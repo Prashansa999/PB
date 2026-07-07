@@ -236,9 +236,17 @@ export function useRoomSession(code: string, role: Role) {
       const video = localVideoRef.current;
       if (!video || video.readyState < 2) return;
 
+      // Capture at the camera's native resolution (capped so payloads stay
+      // sane) instead of a fixed 640×480 — the crisper the source frame, the
+      // sharper the final polaroid crop. The server always center-crops to
+      // a square tile, so exact dimensions here don't matter, only detail.
+      const MAX_DIM = 1080;
+      const vw = video.videoWidth || 1280;
+      const vh = video.videoHeight || 960;
+      const scale = Math.min(1, MAX_DIM / Math.max(vw, vh));
       const canvas = document.createElement("canvas");
-      canvas.width = 640;
-      canvas.height = 480;
+      canvas.width = Math.round(vw * scale);
+      canvas.height = Math.round(vh * scale);
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
@@ -248,7 +256,7 @@ export function useRoomSession(code: string, role: Role) {
       ctx.scale(-1, 1);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
       dispatch({ type: "FLASH_ON" });
       setTimeout(() => dispatch({ type: "FLASH_OFF" }), 180);
 
@@ -362,7 +370,10 @@ export function useRoomSession(code: string, role: Role) {
     let cancelled = false;
 
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "user" }, audio: false })
+      .getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } },
+        audio: false,
+      })
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());

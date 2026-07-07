@@ -11,10 +11,10 @@ const STORAGE_ROOT = path.join(process.cwd(), "storage", "strips");
 // Each participant's frame is center-cropped to this fixed rectangle before
 // being placed side-by-side, so the strip looks consistent regardless of
 // whether a partner is on a portrait phone or a landscape webcam.
-const TILE_WIDTH = 480;
-const TILE_HEIGHT = 480;
-const GUTTER = 8;
-const BORDER = 16;
+const TILE_WIDTH = 620;
+const TILE_HEIGHT = 620;
+const GUTTER = 10;
+const BORDER = 18;
 
 // Warm off-white instant-film paper stock — not pure #fff, which reads
 // digital/clinical. This tint is what makes the frames feel like real
@@ -131,13 +131,13 @@ export async function compositeRound(
 
 // Instax-mini-style frame proportions: slim, even top/side borders and a
 // noticeably deeper bottom "chin" for the handwritten caption.
-const POLAROID_SIDE_MARGIN = 26;
-const POLAROID_TOP_MARGIN = 26;
-const POLAROID_BOTTOM_MARGIN = 104; // the classic instant-photo caption strip
-const POLAROID_CORNER_RADIUS = 16;
-const POLAROID_GAP = 40;
-const CANVAS_PADDING = 72;
-const HEADER_HEIGHT = 84;
+const POLAROID_SIDE_MARGIN = 32;
+const POLAROID_TOP_MARGIN = 32;
+const POLAROID_BOTTOM_MARGIN = 132; // the classic instant-photo caption strip
+const POLAROID_CORNER_RADIUS = 18;
+const POLAROID_GAP = 48;
+const CANVAS_PADDING = 88;
+const HEADER_HEIGHT = 100;
 const SHADOW_OFFSET = 4;
 
 // Per-layout, deterministic (not random) tilt angles and placement
@@ -156,29 +156,60 @@ const STACK_FAN_PX: { dx: number; dy: number }[] = [
   { dx: 32, dy: 40 },
 ];
 
+// Cursive-first font stack for the handwritten bits. On the server rsvg
+// falls back to a plain face (no script fonts installed), so we lean on
+// italic to at least suggest handwriting there; on-device the on-screen
+// cards get a real script font from the same stack.
+const HANDWRITING = "'Segoe Script','Snell Roundhand','Bradley Hand','Comic Sans MS',cursive";
+
 async function buildWhitePolaroidCard(
   photo: Buffer,
-  captionText: string | null
+  captionText: string | null,
+  dateLabel: string
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const { width: photoWidth = 0, height: photoHeight = 0 } = await sharp(photo).metadata();
   const cardWidth = photoWidth + POLAROID_SIDE_MARGIN * 2;
   const cardHeight = photoHeight + POLAROID_TOP_MARGIN + POLAROID_BOTTOM_MARGIN;
+  const chinTop = photoHeight + POLAROID_TOP_MARGIN;
 
   const overlays: { input: Buffer; left: number; top: number }[] = [
     { input: photo, left: POLAROID_SIDE_MARGIN, top: POLAROID_TOP_MARGIN },
   ];
 
+  // A faint recessed keyline around the photo — real instant film has a
+  // slight bevel where the emulsion meets the frame. Sells "printed photo"
+  // over "image pasted on a white box".
+  const keylineSvg = Buffer.from(
+    `<svg width="${photoWidth}" height="${photoHeight}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0.75" y="0.75" width="${photoWidth - 1.5}" height="${photoHeight - 1.5}"
+        fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="1.5"/>
+    </svg>`
+  );
+  overlays.push({ input: keylineSvg, left: POLAROID_SIDE_MARGIN, top: POLAROID_TOP_MARGIN });
+
   if (captionText) {
     const escaped = captionText.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
     const captionSvg = Buffer.from(
       `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
-        <text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle"
-          font-family="'Segoe Script','Snell Roundhand','Bradley Hand','Comic Sans MS',cursive"
-          font-size="34" fill="#6b4a3a">${escaped}</text>
+        <text x="50%" y="44%" text-anchor="middle" dominant-baseline="middle"
+          font-family="${HANDWRITING}" font-style="italic"
+          font-size="44" fill="#6b4a3a">${escaped}</text>
       </svg>`
     );
-    overlays.push({ input: captionSvg, left: 0, top: photoHeight + POLAROID_TOP_MARGIN });
+    overlays.push({ input: captionSvg, left: 0, top: chinTop });
   }
+
+  // The date, handwritten in the corner of the chin — like people actually
+  // date their instants. Always shown, on every card.
+  const dateSvg = Buffer.from(
+    `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
+      <text x="${cardWidth - POLAROID_SIDE_MARGIN}" y="${captionText ? "80%" : "56%"}"
+        text-anchor="end" dominant-baseline="middle"
+        font-family="${HANDWRITING}" font-style="italic"
+        font-size="30" fill="#b08c72">${dateLabel}</text>
+    </svg>`
+  );
+  overlays.push({ input: dateSvg, left: 0, top: chinTop });
 
   let card = await sharp({
     create: { width: cardWidth, height: cardHeight, channels: 3, background: PAPER },
@@ -231,32 +262,44 @@ function seeded(n: number): number {
  * gradient with scattered out-of-focus golden "fairy light" bokeh, echoing
  * the string-light photos couples actually pin their instants over. */
 function buildBackdrop(width: number, height: number): Buffer {
-  const dots: string[] = [];
-  const count = Math.max(10, Math.round((width * height) / 90000));
+  const glows: string[] = []; // big, soft, out-of-focus halos
+  const cores: string[] = []; // tiny bright centers, the "bulb" itself
+  const count = Math.max(12, Math.round((width * height) / 70000));
   for (let i = 0; i < count; i++) {
     const cx = seeded(i * 3 + 1) * width;
     const cy = seeded(i * 3 + 2) * height;
-    const r = 14 + seeded(i * 3 + 3) * 46;
-    const op = 0.18 + seeded(i * 7 + 5) * 0.4;
-    dots.push(
+    const r = 20 + seeded(i * 3 + 3) * 70;
+    const op = 0.16 + seeded(i * 7 + 5) * 0.42;
+    glows.push(
       `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="url(#glow)" opacity="${op.toFixed(2)}"/>`
     );
+    // Only some glows get a visible bright core, for that twinkle variance.
+    if (seeded(i * 5 + 9) > 0.45) {
+      const cr = 2 + seeded(i * 11 + 2) * 4;
+      cores.push(
+        `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${cr.toFixed(1)}" fill="#fff6df" opacity="${(0.5 + seeded(i * 13 + 4) * 0.4).toFixed(2)}"/>`
+      );
+    }
   }
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#fdf0e6"/>
-        <stop offset="55%" stop-color="#f9e6d6"/>
-        <stop offset="100%" stop-color="#f3dcc8"/>
+        <stop offset="0%" stop-color="#fdf1e7"/>
+        <stop offset="55%" stop-color="#f8e5d4"/>
+        <stop offset="100%" stop-color="#f1d9c4"/>
       </linearGradient>
       <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#ffe9b8" stop-opacity="1"/>
-        <stop offset="45%" stop-color="#ffd98a" stop-opacity="0.7"/>
+        <stop offset="0%" stop-color="#ffeaba" stop-opacity="1"/>
+        <stop offset="40%" stop-color="#ffd98a" stop-opacity="0.65"/>
         <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
       </radialGradient>
+      <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="7"/>
+      </filter>
     </defs>
     <rect width="${width}" height="${height}" fill="url(#bg)"/>
-    ${dots.join("\n")}
+    <g filter="url(#soft)">${glows.join("")}</g>
+    <g filter="url(#soft)">${cores.join("")}</g>
   </svg>`;
   return Buffer.from(svg);
 }
@@ -370,10 +413,13 @@ export async function assembleFinalStrip(
   layout: PolaroidLayout
 ): Promise<{ url: string }> {
   const rotations = ROTATIONS_DEG[layout];
+  // Short, handwritten-style date for the corner of each instant (M.D.YY).
+  const now = new Date();
+  const cardDate = `${now.getMonth() + 1}.${now.getDate()}.${String(now.getFullYear()).slice(-2)}`;
 
   const cards = await Promise.all(
     roundBuffers.map((buf, i) =>
-      buildWhitePolaroidCard(buf, i === roundBuffers.length - 1 ? caption || null : null)
+      buildWhitePolaroidCard(buf, i === roundBuffers.length - 1 ? caption || null : null, cardDate)
     )
   );
   const rotated = await Promise.all(
@@ -383,14 +429,13 @@ export async function assembleFinalStrip(
 
   const { width, height, placements } = computeLayout(layout, rotated);
 
-  const dateLabel = new Date().toLocaleDateString(undefined, { month: "long", day: "numeric" });
   const headerSvg = Buffer.from(
     `<svg width="${width}" height="${HEADER_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-      <text x="50%" y="46%" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
-        font-size="34" font-weight="700" fill="#b45309">us, together 🤍</text>
-      <text x="50%" y="80%" text-anchor="middle"
+      <text x="50%" y="44%" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
+        font-size="46" font-weight="700" fill="#b45309">us, together 🤍</text>
+      <text x="50%" y="82%" text-anchor="middle"
         font-family="'Segoe Script','Snell Roundhand','Bradley Hand',cursive"
-        font-size="20" fill="#a8836a">${dateLabel} · at the same second</text>
+        font-size="26" fill="#a8836a">at the same second</text>
     </svg>`
   );
 
