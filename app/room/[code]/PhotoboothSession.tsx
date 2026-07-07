@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRoomSession } from "@/lib/client/useRoomSession";
+import { useRoomSession, type RoundResult } from "@/lib/client/useRoomSession";
 import type { Role, MagnetAddress } from "@/lib/shared/protocol";
-import { PHOTOBOOTH_FILTERS } from "@/lib/shared/filters";
+import { PHOTOBOOTH_FILTERS, type FilterId } from "@/lib/shared/filters";
 import { CountdownOverlay } from "./_components/CountdownOverlay";
 import { MagnetOrderForm } from "./_components/MagnetOrderForm";
 import { FilterPicker } from "./_components/FilterPicker";
+import { CaptionField } from "./_components/CaptionField";
+import { HeartBurst } from "./_components/HeartBurst";
+import { PolaroidStrip } from "./_components/PolaroidStrip";
 
 export function PhotoboothSession({ code, role }: { code: string; role: Role }) {
   const {
@@ -19,13 +22,28 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
     retake,
     retryCamera,
     selectFilter,
+    setCaption,
     orderMagnet,
   } = useRoomSession(code, role);
   const [showMagnetForm, setShowMagnetForm] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showHeartBurst, setShowHeartBurst] = useState(false);
+  const hasBurstThisSession = useRef(false);
 
   const activeFilterCss =
     PHOTOBOOTH_FILTERS.find((f) => f.id === state.selectedFilter)?.cssPreview ?? "none";
+
+  // Fire the heart burst once per capture session — the very first reveal,
+  // not every subsequent filter/caption regrade (that would get old fast).
+  // Resets when a retake sends the phase back to "ready".
+  useEffect(() => {
+    if (state.phase === "revealed" && !hasBurstThisSession.current) {
+      hasBurstThisSession.current = true;
+      setShowHeartBurst(true);
+    } else if (state.phase === "ready") {
+      hasBurstThisSession.current = false;
+    }
+  }, [state.phase]);
 
   async function shareCode() {
     const url = `${window.location.origin}/room/${code}`;
@@ -139,6 +157,7 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                       selectedFilter={state.selectedFilter}
                       onSelect={selectFilter}
                     />
+                    <CaptionField caption={state.caption} onChange={setCaption} />
                     <div className="mt-6 flex justify-center">
                       <button
                         onClick={startCountdown}
@@ -165,12 +184,22 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
             )}
 
             {state.phase === "revealed" && state.stripUrl && (
-              <StripReveal
-                stripUrl={state.stripUrl}
-                clipUrl={state.clipUrl}
-                onRetake={retake}
-                onOrderMagnet={() => setShowMagnetForm(true)}
-              />
+              <>
+                {showHeartBurst && <HeartBurst />}
+                <StripReveal
+                  stripUrl={state.stripUrl}
+                  clipUrl={state.clipUrl}
+                  roundResults={state.roundResults}
+                  caption={state.caption}
+                  regrading={state.regradingStrip}
+                  localStream={localStream}
+                  selectedFilter={state.selectedFilter}
+                  onSelectFilter={selectFilter}
+                  onSetCaption={setCaption}
+                  onRetake={retake}
+                  onOrderMagnet={() => setShowMagnetForm(true)}
+                />
+              </>
             )}
           </>
         )}
@@ -308,26 +337,42 @@ function RoundIndicator({
 function StripReveal({
   stripUrl,
   clipUrl,
+  roundResults,
+  caption,
+  regrading,
+  localStream,
+  selectedFilter,
+  onSelectFilter,
+  onSetCaption,
   onRetake,
   onOrderMagnet,
 }: {
   stripUrl: string;
   clipUrl: string | null;
+  roundResults: RoundResult[];
+  caption: string;
+  regrading: boolean;
+  localStream: MediaStream | null;
+  selectedFilter: FilterId;
+  onSelectFilter: (id: FilterId) => void;
+  onSetCaption: (caption: string) => void;
   onRetake: () => void;
   onOrderMagnet: () => void;
 }) {
+  const [showTweaks, setShowTweaks] = useState(false);
+
   return (
     <div className="flex w-full max-w-sm flex-col items-center">
-      <h1 className="mb-4 text-center text-2xl font-bold font-[family-name:var(--font-display)]">
-        You did it — together.
+      <h1 className="mb-1 text-center text-2xl font-bold font-[family-name:var(--font-display)]">
+        You did it — together. 🩷
       </h1>
-      {/* eslint-disable-next-line @next/next/no-img-element -- server-generated, non-static asset; next/image's optimizer adds no value here */}
-      <img
-        src={stripUrl}
-        alt="Your photobooth strip"
-        className="strip-reveal w-full max-w-xs rounded-lg shadow-2xl"
-      />
-      <div className="mt-6 grid w-full grid-cols-2 gap-3">
+      {regrading && (
+        <p className="mb-2 animate-pulse text-xs font-medium text-accent-strong">Updating your strip…</p>
+      )}
+
+      <PolaroidStrip roundResults={roundResults} caption={caption} />
+
+      <div className="mt-2 grid w-full grid-cols-2 gap-3">
         <a
           href={stripUrl}
           download="sp-photobooth-strip.png"
@@ -351,7 +396,22 @@ function StripReveal({
       >
         Turn this into a magnet 🧲
       </button>
-      <button onClick={onRetake} className="mt-3 text-sm opacity-60 hover:opacity-100">
+
+      <button
+        onClick={() => setShowTweaks((v) => !v)}
+        className="mt-4 text-sm font-medium text-accent-strong hover:opacity-80"
+      >
+        {showTweaks ? "Hide filters" : "Not feeling it? Try another filter"}
+      </button>
+
+      {showTweaks && (
+        <div className="mt-2 w-full rounded-2xl border border-border bg-card p-4">
+          <FilterPicker stream={localStream} selectedFilter={selectedFilter} onSelect={onSelectFilter} />
+          <CaptionField caption={caption} onChange={onSetCaption} />
+        </div>
+      )}
+
+      <button onClick={onRetake} className="mt-4 text-sm opacity-60 hover:opacity-100">
         Retake the strip
       </button>
     </div>

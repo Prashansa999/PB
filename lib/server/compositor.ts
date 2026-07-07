@@ -84,64 +84,144 @@ export async function compositeRound(
   return { buffer, url: `/api/strip-image/${code}/${filename}` };
 }
 
+const POLAROID_SIDE_MARGIN = 22;
+const POLAROID_TOP_MARGIN = 22;
+const POLAROID_BOTTOM_MARGIN = 88; // the classic instant-photo caption strip
+const POLAROID_CORNER_RADIUS = 10;
+const POLAROID_GAP = 34;
+const CANVAS_PADDING = 60;
+// Alternating tilt/drift per card index — deterministic, not random, so a
+// given session's layout is stable if the strip is ever regenerated.
+const CARD_ROTATIONS_DEG = [-4, 3, -3.5, 4.5];
+const CARD_DRIFT_PX = [-16, 12, -10, 16];
+
+async function buildWhitePolaroidCard(
+  photo: Buffer,
+  captionText: string | null
+): Promise<{ buffer: Buffer; width: number; height: number }> {
+  const { width: photoWidth = 0, height: photoHeight = 0 } = await sharp(photo).metadata();
+  const cardWidth = photoWidth + POLAROID_SIDE_MARGIN * 2;
+  const cardHeight = photoHeight + POLAROID_TOP_MARGIN + POLAROID_BOTTOM_MARGIN;
+
+  const overlays: { input: Buffer; left: number; top: number }[] = [
+    { input: photo, left: POLAROID_SIDE_MARGIN, top: POLAROID_TOP_MARGIN },
+  ];
+
+  if (captionText) {
+    const escaped = captionText.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
+    const captionSvg = Buffer.from(
+      `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
+        <text x="50%" y="58%" text-anchor="middle" dominant-baseline="middle"
+          font-family="'Segoe Script','Bradley Hand','Comic Sans MS',cursive" font-size="30"
+          fill="#4a3626">${escaped}</text>
+      </svg>`
+    );
+    overlays.push({ input: captionSvg, left: 0, top: photoHeight + POLAROID_TOP_MARGIN });
+  }
+
+  let card = await sharp({
+    create: { width: cardWidth, height: cardHeight, channels: 3, background: { r: 255, g: 255, b: 255 } },
+  })
+    .composite(overlays)
+    .png()
+    .toBuffer();
+
+  // Round the corners: an alpha mask shaped like a rounded rect, applied
+  // with dest-in so anything outside it (including the square corners of
+  // the white background) becomes transparent.
+  const maskSvg = Buffer.from(
+    `<svg width="${cardWidth}" height="${cardHeight}"><rect width="${cardWidth}" height="${cardHeight}"
+      rx="${POLAROID_CORNER_RADIUS}" ry="${POLAROID_CORNER_RADIUS}" fill="#fff"/></svg>`
+  );
+  card = await sharp(card)
+    .ensureAlpha()
+    .composite([{ input: await sharp(maskSvg).png().toBuffer(), blend: "dest-in" }])
+    .png()
+    .toBuffer();
+
+  return { buffer: card, width: cardWidth, height: cardHeight };
+}
+
+async function buildCardShadow(width: number, height: number): Promise<Buffer> {
+  const svg = Buffer.from(
+    `<svg width="${width}" height="${height}"><rect width="${width}" height="${height}"
+      rx="${POLAROID_CORNER_RADIUS}" ry="${POLAROID_CORNER_RADIUS}" fill="black" fill-opacity="0.32"/></svg>`
+  );
+  return sharp(await sharp(svg).png().toBuffer())
+    .blur(9)
+    .png()
+    .toBuffer();
+}
+
+async function rotateWithTransparentPadding(
+  buffer: Buffer,
+  angleDeg: number
+): Promise<{ buffer: Buffer; width: number; height: number }> {
+  const rotated = await sharp(buffer)
+    .ensureAlpha()
+    .rotate(angleDeg, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+  const { width = 0, height = 0 } = await sharp(rotated).metadata();
+  return { buffer: rotated, width, height };
+}
+
 /**
- * Stacks every round's composite vertically into the final strip, the
- * classic photobooth output.
+ * Turns every round's composite into a rotated, drop-shadowed polaroid card
+ * and lays them out down the strip like they were tossed onto a table —
+ * the classic scattered-photos look, not a rigid grid. The last card gets
+ * the shared caption (if any) handwritten into its bottom margin, the way
+ * people actually write on real Polaroids.
  */
 export async function assembleFinalStrip(
   code: string,
-  roundBuffers: Buffer[]
+  roundBuffers: Buffer[],
+  caption: string
 ): Promise<{ url: string }> {
-  const metas = await Promise.all(roundBuffers.map((b) => sharp(b).metadata()));
-  const width = Math.max(...metas.map((m) => m.width ?? 0));
-  const stripGutter = 6;
-  const headerHeight = 64;
-  const footerHeight = 40;
-  const totalHeight =
-    headerHeight +
-    footerHeight +
-    metas.reduce((sum, m) => sum + (m.height ?? 0), 0) +
-    stripGutter * (roundBuffers.length - 1);
+  const cards = await Promise.all(
+    roundBuffers.map((buf, i) =>
+      buildWhitePolaroidCard(buf, i === roundBuffers.length - 1 ? caption || null : null)
+    )
+  );
+
+  const rotated = await Promise.all(
+    cards.map((card, i) => rotateWithTransparentPadding(card.buffer, CARD_ROTATIONS_DEG[i % CARD_ROTATIONS_DEG.length]))
+  );
+  const shadows = await Promise.all(rotated.map((r) => buildCardShadow(r.width, r.height)));
+
+  const headerHeight = 76;
+  const maxCardWidth = Math.max(...rotated.map((r) => r.width));
+  const maxDrift = Math.max(...CARD_DRIFT_PX.map(Math.abs));
+  const width = maxCardWidth + maxDrift * 2 + CANVAS_PADDING * 2;
 
   let y = headerHeight;
-  const composites: { input: Buffer; left: number; top: number }[] = roundBuffers.map((buf, i) => {
-    const entry = { input: buf, left: 0, top: y };
-    y += (metas[i].height ?? 0) + stripGutter;
-    return entry;
-  });
+  const composites: { input: Buffer; left: number; top: number; blend?: "over" }[] = [];
+  for (let i = 0; i < rotated.length; i++) {
+    const drift = CARD_DRIFT_PX[i % CARD_DRIFT_PX.length];
+    const left = Math.round((width - rotated[i].width) / 2 + drift);
+    const shadowOffset = 7;
+    composites.push({ input: shadows[i], left: left + shadowOffset, top: y + shadowOffset });
+    composites.push({ input: rotated[i].buffer, left, top: y });
+    y += rotated[i].height + POLAROID_GAP;
+  }
 
-  const dateLabel = new Date().toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const totalHeight = y - POLAROID_GAP + CANVAS_PADDING;
+
   const headerSvg = Buffer.from(
     `<svg width="${width}" height="${headerHeight}" xmlns="http://www.w3.org/2000/svg">
-      <text x="50%" y="60%" text-anchor="middle" font-family="Georgia, serif"
-        font-size="32" font-weight="700" fill="#c2410c">S P Photobooth</text>
-    </svg>`
-  );
-  const footerSvg = Buffer.from(
-    `<svg width="${width}" height="${footerHeight}" xmlns="http://www.w3.org/2000/svg">
       <text x="50%" y="65%" text-anchor="middle" font-family="Georgia, serif"
-        font-size="18" fill="#9a3412">${dateLabel} · captured together, at the same second</text>
+        font-size="34" font-weight="700" fill="#c2410c">S P Photobooth 🩷</text>
     </svg>`
   );
-  composites.push(
-    { input: headerSvg, left: 0, top: 0 },
-    { input: footerSvg, left: 0, top: totalHeight - footerHeight }
-  );
+  composites.unshift({ input: headerSvg, left: 0, top: 0 });
 
-  const strip = sharp({
-    create: {
-      width,
-      height: totalHeight,
-      channels: 3,
-      background: { r: 255, g: 248, b: 240 },
-    },
-  }).composite(composites);
+  const buffer = await sharp({
+    create: { width, height: totalHeight, channels: 3, background: { r: 255, g: 248, b: 240 } },
+  })
+    .composite(composites)
+    .png()
+    .toBuffer();
 
-  const buffer = await strip.png().toBuffer();
   const dir = await ensureRoomDir(code);
   const filename = "strip.png";
   await writeFile(path.join(dir, filename), buffer);

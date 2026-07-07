@@ -52,6 +52,8 @@ export interface RoomSessionState {
   magnetOrderId: string | null;
   unsupportedReason: string | null;
   selectedFilter: FilterId;
+  caption: string;
+  regradingStrip: boolean;
 }
 
 type Action =
@@ -81,6 +83,8 @@ const initialState: RoomSessionState = {
   magnetOrderId: null,
   unsupportedReason: null,
   selectedFilter: "none",
+  caption: "",
+  regradingStrip: false,
 };
 
 function reducer(state: RoomSessionState, action: Action): RoomSessionState {
@@ -110,6 +114,7 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             role: msg.role,
             phase: "lobby-waiting",
             selectedFilter: msg.selectedFilter,
+            caption: msg.caption,
           };
         case "peer-joined":
           return { ...state, peerConnected: true, phase: "ready" };
@@ -117,6 +122,10 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
           return { ...state, peerConnected: false, phase: "lobby-waiting" };
         case "filter-selected":
           return { ...state, selectedFilter: msg.filterId };
+        case "caption-updated":
+          return { ...state, caption: msg.caption };
+        case "regrading":
+          return { ...state, regradingStrip: true };
         case "stabilizing":
           return { ...state, phase: "stabilizing" };
         case "countdown-start":
@@ -145,6 +154,7 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             phase: "revealed",
             stripUrl: msg.stripUrl,
             clipUrl: msg.clipUrl,
+            regradingStrip: false,
           };
         case "retake-ack":
           return {
@@ -152,11 +162,12 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             phase: "ready",
             role: state.role,
             peerConnected: state.peerConnected,
-            // The server keeps the chosen filter across a retake (see
-            // resetRoomForRetake) — mirror that here instead of dropping
-            // back to "none", or the picker would silently lie about what
-            // the next strip will actually use.
+            // The server keeps the chosen filter and caption across a
+            // retake (see resetRoomForRetake) — mirror that here instead of
+            // dropping back to defaults, or the picker/caption field would
+            // silently lie about what the next strip will actually use.
             selectedFilter: state.selectedFilter,
+            caption: state.caption,
           };
         case "magnet-order-confirmed":
           return { ...state, magnetOrderId: msg.orderId };
@@ -464,6 +475,13 @@ export function useRoomSession(code: string, role: Role) {
     [sendMessage]
   );
 
+  const setCaption = useCallback(
+    (caption: string) => {
+      sendMessage({ type: "set-caption", caption });
+    },
+    [sendMessage]
+  );
+
   const orderMagnet = useCallback(
     (addressHost: MagnetAddress, addressGuest: MagnetAddress) => {
       sendMessage({ type: "order-magnet", addressHost, addressGuest });
@@ -480,6 +498,7 @@ export function useRoomSession(code: string, role: Role) {
     retake,
     retryCamera,
     selectFilter,
+    setCaption,
     orderMagnet,
   };
 }

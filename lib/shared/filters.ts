@@ -14,6 +14,8 @@ export const FILTER_IDS = [
   "dreamy",
   "vivid",
   "flash",
+  "chungking",
+  "neon",
 ] as const;
 
 export type FilterId = (typeof FILTER_IDS)[number];
@@ -78,6 +80,18 @@ export const PHOTOBOOTH_FILTERS: FilterMeta[] = [
     label: "Flash",
     description: "Bright direct-flash party-photobooth look.",
     cssPreview: "brightness(1.2) contrast(1.1) saturate(1.05)",
+  },
+  {
+    id: "chungking",
+    label: "Chungking",
+    description: "Moody neon nights, saturated and grainy — city-at-midnight energy.",
+    cssPreview: "saturate(1.5) contrast(1.3) brightness(0.95) hue-rotate(8deg) sepia(0.12)",
+  },
+  {
+    id: "neon",
+    label: "Neon Trails",
+    description: "Same neon-night mood, with light trails streaking through.",
+    cssPreview: "saturate(1.6) contrast(1.3) brightness(0.94) hue-rotate(10deg) blur(0.4px)",
   },
 ];
 

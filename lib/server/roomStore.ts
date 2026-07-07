@@ -36,6 +36,15 @@ export interface Room {
   // deliberately not a per-client preference, so both partners' strips
   // always match.
   selectedFilter: FilterId;
+  // Also shared/synced — a short note either partner can write, baked into
+  // the strip. Not cleared on retake, same reasoning as selectedFilter.
+  caption: string;
+  // Bumped every time the strip/clip files on disk are regenerated in
+  // place (filter or caption change after reveal). The filename never
+  // changes, so this gets appended as a `?v=` query param — otherwise the
+  // browser would keep showing a cached copy of the old grade.
+  revealVersion: number;
+  captionRegradeTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const rooms = new Map<string, Room>();
@@ -68,6 +77,9 @@ export function createRoom(): Room {
     finalStripUrl: null,
     finalClipUrl: null,
     selectedFilter: "none",
+    caption: "",
+    revealVersion: 0,
+    captionRegradeTimer: null,
   };
   rooms.set(code, room);
   return room;
@@ -82,6 +94,8 @@ export function touchRoom(room: Room): void {
 }
 
 export function resetRoomForRetake(room: Room): void {
+  if (room.captionRegradeTimer) clearTimeout(room.captionRegradeTimer);
+  room.captionRegradeTimer = null;
   room.state = "ready";
   room.currentRound = 0;
   room.rounds = freshRounds(room.totalRounds);
@@ -90,6 +104,8 @@ export function resetRoomForRetake(room: Room): void {
 }
 
 export function deleteRoom(code: string): void {
+  const room = rooms.get(code);
+  if (room?.captionRegradeTimer) clearTimeout(room.captionRegradeTimer);
   rooms.delete(code);
 }
 
@@ -107,7 +123,7 @@ export function sweepExpiredRooms(): void {
       (!isDone && idleMs > LOBBY_TIMEOUT_MS) ||
       (isDone && idleMs > COMPLETED_TIMEOUT_MS)
     ) {
-      rooms.delete(code);
+      deleteRoom(code);
     }
   }
 }

@@ -14,6 +14,14 @@ interface FilterRecipe {
   grainAlpha?: number;
   // 0-1 strength of a radial-darkening vignette composited with 'multiply'.
   vignetteStrength?: number;
+  // A soft mood-color wash — unlike `tint`, this does NOT replace the
+  // image's own chroma, it lays a translucent color over it. Right tool for
+  // a cinematic cast (neon signage, tungsten light) on an otherwise still
+  // colorful image; `tint` would flatten it toward monochrome instead.
+  wash?: { r: number; g: number; b: number; alpha: number; blend: "overlay" | "soft-light" };
+  // Faked light-trail / step-print smear: N offset, faded, screen-blended
+  // copies of the frame layered back on top of itself.
+  streak?: { dx: number; dy: number; alpha: number }[];
 }
 
 const RECIPES: Record<FilterId, FilterRecipe> = {
@@ -61,6 +69,29 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
     grainAlpha: 0.08,
     vignetteStrength: 0.05,
   },
+  // The next two are a style homage to Christopher Doyle's cinematography
+  // on Chungking Express / Fallen Angels: pushed, grainy 35mm, saturated
+  // neon color with crushed contrast — not a copy of any frame from the
+  // film, just the same *kind* of grade (the way "film" or "noir" above
+  // are genres, not specific stocks or movies).
+  chungking: {
+    modulate: { brightness: 0.97, saturation: 1.4, hue: 6 },
+    linear: { a: 1.22, b: -18 },
+    wash: { r: 255, g: 140, b: 60, alpha: 0.14, blend: "soft-light" },
+    grainAlpha: 0.14,
+    vignetteStrength: 0.3,
+  },
+  neon: {
+    modulate: { brightness: 0.96, saturation: 1.45, hue: 8 },
+    linear: { a: 1.22, b: -18 },
+    wash: { r: 255, g: 100, b: 160, alpha: 0.12, blend: "soft-light" },
+    grainAlpha: 0.12,
+    vignetteStrength: 0.28,
+    streak: [
+      { dx: 6, dy: 3, alpha: 0.22 },
+      { dx: 13, dy: 6, alpha: 0.12 },
+    ],
+  },
 };
 
 async function buildGrain(width: number, height: number, alpha: number): Promise<Buffer> {
@@ -92,6 +123,20 @@ async function buildVignette(width: number, height: number, strength: number): P
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
+async function buildWash(
+  width: number,
+  height: number,
+  color: { r: number; g: number; b: number },
+  alpha: number
+): Promise<Buffer> {
+  return sharp({
+    create: { width, height, channels: 3, background: color },
+  })
+    .ensureAlpha(alpha)
+    .png()
+    .toBuffer();
+}
+
 /** Bakes the chosen filter's real pixel processing into a frame. This is
  * the authoritative output — what gets composited into the strip, what
  * downloads, what gets printed on the magnet. The client's CSS preview is
@@ -110,11 +155,34 @@ export async function applyFilter(input: Buffer, filterId: FilterId): Promise<Bu
   if (recipe.linear) pipeline = pipeline.linear(recipe.linear.a, recipe.linear.b);
 
   let buffer = await pipeline.toBuffer();
+  const { width = 0, height = 0 } = await sharp(buffer).metadata();
 
-  if (recipe.grainAlpha || recipe.vignetteStrength) {
-    const { width = 0, height = 0 } = await sharp(buffer).metadata();
-    const overlays: { input: Buffer; blend: "over" | "multiply" }[] = [];
+  // Light-trail smear: offset, faded, screen-blended copies of the frame
+  // laid back on top of itself. Screen blend brightens like a real light
+  // trail rather than just ghosting a dark double-exposure.
+  if (recipe.streak && recipe.streak.length > 0) {
+    const layers = await Promise.all(
+      recipe.streak.map((s) => sharp(buffer).ensureAlpha(s.alpha).png().toBuffer())
+    );
+    buffer = await sharp(buffer)
+      .composite(
+        recipe.streak.map((s, i) => ({
+          input: layers[i],
+          left: Math.round(s.dx),
+          top: Math.round(s.dy),
+          blend: "screen" as const,
+        }))
+      )
+      .toBuffer();
+  }
 
+  if (recipe.wash || recipe.grainAlpha || recipe.vignetteStrength) {
+    const overlays: { input: Buffer; blend: "over" | "multiply" | "overlay" | "soft-light" }[] = [];
+
+    if (recipe.wash) {
+      const { r, g, b, alpha, blend } = recipe.wash;
+      overlays.push({ input: await buildWash(width, height, { r, g, b }, alpha), blend });
+    }
     if (recipe.grainAlpha) {
       overlays.push({ input: await buildGrain(width, height, recipe.grainAlpha), blend: "over" });
     }

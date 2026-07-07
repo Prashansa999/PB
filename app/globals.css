@@ -60,21 +60,6 @@ body {
   animation: flash-pop 400ms ease-out;
 }
 
-@keyframes strip-unfurl {
-  from {
-    transform: translateY(-24px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-.strip-reveal {
-  animation: strip-unfurl 700ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
 @keyframes countdown-beat {
   0% {
     transform: scale(1.6);
@@ -92,4 +77,33 @@ body {
 
 .countdown-beat {
   animation: countdown-beat 1s ease-out;
+}
+
+@keyframes heart-rise {
+  0% {
+    transform: translate(0, 0) scale(0.6) rotate(0deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--drift), -100vh) scale(1) rotate(20deg);
+    opacity: 0;
+  }
+}
+
+@keyframes polaroid-drop {
+  from {
+    transform: translateY(-40px) rotate(0deg);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) rotate(var(--tilt));
+    opacity: 1;
+  }
+}
+
+.polaroid-card {
+  animation: polaroid-drop 600ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }

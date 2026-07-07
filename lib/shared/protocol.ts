@@ -36,7 +36,10 @@ export type ClientMessage =
     }
   | { type: "retake" }
   | { type: "select-filter"; filterId: FilterId }
+  | { type: "set-caption"; caption: string }
   | { type: "order-magnet"; addressHost: MagnetAddress; addressGuest: MagnetAddress };
+
+export const CAPTION_MAX_LENGTH = 80;
 
 export interface MagnetAddress {
   name: string;
@@ -51,10 +54,23 @@ export interface MagnetAddress {
 // ---------- Server -> Client ----------
 
 export type ServerMessage =
-  | { type: "welcome"; role: Role; code: string; state: RoomState; selectedFilter: FilterId }
+  | {
+      type: "welcome";
+      role: Role;
+      code: string;
+      state: RoomState;
+      selectedFilter: FilterId;
+      caption: string;
+    }
   | { type: "peer-joined" }
   | { type: "peer-left" }
   | { type: "filter-selected"; filterId: FilterId }
+  | { type: "caption-updated"; caption: string }
+  // Distinct from "compositing": that phase covers the initial capture
+  // flow. This one fires when an already-revealed strip is being
+  // re-rendered (new filter or caption) — the UI stays on the reveal
+  // screen and just shows a lightweight "updating..." state over it.
+  | { type: "regrading" }
   | { type: "clock-sync-pong"; id: string; t0: number; t1: number; t2: number }
   | { type: "signal"; payload: unknown }
   | {

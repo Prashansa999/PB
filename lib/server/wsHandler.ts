@@ -18,6 +18,7 @@ import {
 import {
   COUNTDOWN_VISIBLE_MS,
   INTER_ROUND_DELAY_MS,
+  CAPTION_MAX_LENGTH,
   type ClientMessage,
   type ServerMessage,
   type Role,
@@ -27,6 +28,11 @@ import { isFilterId } from "../shared/filters";
 const DEFAULT_ROUND_TRIP_MS = 150;
 const MAX_LEAD_MS = 8000;
 const REVEAL_BUFFER_MS = 400;
+const CAPTION_REGRADE_DEBOUNCE_MS = 700;
+
+function withVersion(url: string, version: number): string {
+  return `${url}?v=${version}`;
+}
 
 function send(ws: WebSocket, message: ServerMessage): void {
   if (ws.readyState === WebSocket.OPEN) {
@@ -119,10 +125,16 @@ async function handleFrameComplete(room: Room, round: number): Promise<void> {
   }
 }
 
+function roundBuffers(room: Room): Buffer[] {
+  return room.rounds.map((r) => r.compositeBuffer).filter((b): b is Buffer => !!b);
+}
+
+/** First-time reveal at the end of round 4: assembles both the strip and
+ * the clip, then broadcasts the synchronized reveal. */
 async function finalizeStrip(room: Room): Promise<void> {
-  const buffers = room.rounds.map((r) => r.compositeBuffer).filter((b): b is Buffer => !!b);
+  const buffers = roundBuffers(room);
   const [{ url: stripUrl }, clip] = await Promise.all([
-    assembleFinalStrip(room.code, buffers),
+    assembleFinalStrip(room.code, buffers, room.caption),
     assembleClip(room.code, buffers).catch((err) => {
       console.error(`[room ${room.code}] clip generation failed`, err);
       return null;
@@ -132,14 +144,66 @@ async function finalizeStrip(room: Room): Promise<void> {
   room.finalStripUrl = stripUrl;
   room.finalClipUrl = clip?.url ?? null;
   room.state = "revealed";
+  room.revealVersion++;
 
   const tReveal = Date.now() + REVEAL_BUFFER_MS;
   broadcast(room, {
     type: "reveal",
-    stripUrl,
-    clipUrl: room.finalClipUrl,
+    stripUrl: withVersion(stripUrl, room.revealVersion),
+    clipUrl: room.finalClipUrl ? withVersion(room.finalClipUrl, room.revealVersion) : null,
     tReveal,
   });
+}
+
+/** Post-reveal filter change: the raw per-partner frames are still sitting
+ * in room.rounds (never cleared), so this re-runs the *entire* pipeline —
+ * filter -> composite -> strip -> clip — from those, without asking anyone
+ * to pick up the camera again. */
+async function regradeStrip(room: Room): Promise<void> {
+  broadcast(room, { type: "regrading" });
+  try {
+    for (let round = 0; round < room.rounds.length; round++) {
+      const data = room.rounds[round];
+      if (!data.hostFrame || !data.guestFrame) continue;
+      const { buffer, url } = await compositeRound(
+        room.code,
+        round,
+        data.hostFrame,
+        data.guestFrame,
+        room.selectedFilter
+      );
+      data.compositeBuffer = buffer;
+      data.compositeUrl = url;
+    }
+    await finalizeStrip(room);
+  } catch (err) {
+    broadcast(room, {
+      type: "error",
+      code: "regrade-failed",
+      message: "We couldn't apply that filter. Please try again.",
+    });
+    console.error(`[room ${room.code}] regrade failed`, err);
+  }
+}
+
+/** Post-reveal caption change: cheaper than a filter regrade — the round
+ * composites already reflect the current filter and don't need touching,
+ * only the assembled strip (which bakes the caption into the last card)
+ * gets rebuilt. The clip never shows the caption, so it's left alone. */
+async function regenerateStripOnly(room: Room): Promise<void> {
+  try {
+    const { url: stripUrl } = await assembleFinalStrip(room.code, roundBuffers(room), room.caption);
+    room.finalStripUrl = stripUrl;
+    room.revealVersion++;
+    broadcast(room, {
+      type: "reveal",
+      stripUrl: withVersion(stripUrl, room.revealVersion),
+      clipUrl: room.finalClipUrl ? withVersion(room.finalClipUrl, room.revealVersion) : null,
+      tReveal: Date.now(),
+    });
+  } catch (err) {
+    console.error(`[room ${room.code}] caption regenerate failed`, err);
+  }
 }
 
 interface SocketContext {
@@ -199,6 +263,7 @@ export function attachWebSocketServer(server: HttpServer): void {
       code,
       state: room.state,
       selectedFilter: room.selectedFilter,
+      caption: room.caption,
     });
 
     if (room.host && room.guest) {
@@ -267,14 +332,37 @@ export function attachWebSocketServer(server: HttpServer): void {
         }
 
         case "select-filter": {
-          // Only a pre-countdown decision — once round 0 has started,
-          // changing it mid-strip would mean the strip doesn't match what
-          // either partner saw agreed on. Retaking resets state back to
-          // "ready" without clearing selectedFilter, so the choice persists.
+          // Allowed before the countdown starts (the original "pick
+          // together" moment) and again once the strip is revealed (a
+          // do-over on the grade using the raw frames already on hand).
+          // Disallowed mid-capture (countdown/round-active/compositing) —
+          // changing the grade half-way through a strip would leave some
+          // rounds on the old filter and some on the new one.
           if (!isFilterId(message.filterId)) break;
-          if (room.state !== "lobby" && room.state !== "ready") break;
+          if (room.state !== "lobby" && room.state !== "ready" && room.state !== "revealed") break;
           room.selectedFilter = message.filterId;
           broadcast(room, { type: "filter-selected", filterId: message.filterId });
+          if (room.state === "revealed") void regradeStrip(room);
+          break;
+        }
+
+        case "set-caption": {
+          if (typeof message.caption !== "string") break;
+          if (room.state === "countdown" || room.state === "round-active" || room.state === "compositing") break;
+          room.caption = message.caption.slice(0, CAPTION_MAX_LENGTH);
+          broadcast(room, { type: "caption-updated", caption: room.caption });
+
+          if (room.state === "revealed") {
+            // Debounced: re-rendering the strip on every keystroke would
+            // hammer sharp for no benefit — the live `caption-updated`
+            // broadcast above already keeps both text inputs in sync
+            // instantly, only the baked-in strip image lags slightly.
+            if (room.captionRegradeTimer) clearTimeout(room.captionRegradeTimer);
+            room.captionRegradeTimer = setTimeout(() => {
+              room.captionRegradeTimer = null;
+              void regenerateStripOnly(room);
+            }, CAPTION_REGRADE_DEBOUNCE_MS);
+          }
           break;
         }
 
