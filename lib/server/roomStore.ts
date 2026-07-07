@@ -40,6 +40,10 @@ export interface Room {
   // Also shared/synced — how the round photos are arranged into the final
   // strip image. Same persistence rules as selectedFilter.
   selectedLayout: PolaroidLayout;
+  // Also shared/synced — soft-focus "portrait" background blur baked into
+  // each round tile. Changing it needs the full per-round regrade (like a
+  // filter change), not the cheap strip-only path.
+  backgroundBlur: boolean;
   // Also shared/synced — a short note either partner can write, baked into
   // the strip. Not cleared on retake, same reasoning as selectedFilter.
   caption: string;
@@ -85,8 +89,9 @@ export function createRoom(): Room {
     rounds: freshRounds(TOTAL_ROUNDS),
     finalStripUrl: null,
     finalClipUrl: null,
-    selectedFilter: "none",
+    selectedFilter: "film",
     selectedLayout: "strip",
+    backgroundBlur: false,
     caption: "",
     revealVersion: 0,
     stripRegradeTimer: null,

@@ -12,10 +12,12 @@ build prompt, focused entirely on making the synchronized capture actually work.
 - **Room** (`/room/[code]`) — camera permission, a live WebRTC preview of both people,
   a synchronized 3-2-1 countdown, 4 rounds of capture, server-side compositing into a
   classic photo strip, and a simultaneous reveal.
-- **After the reveal** — not before — either partner can pick a filter, rearrange the
-  photos (strip / collage / stack), and write a shared caption. All three are synced
-  live over the websocket and re-baked into the actual strip image, not just a CSS
-  preview; the strip stays editable for as long as you want to keep tweaking it.
+- **After the reveal** — not before — either partner can pick a filter (a warm
+  instant-film look is the default), rearrange the photos (strip / collage / stack),
+  toggle a soft-focus background blur, and write a shared caption. All are synced live
+  over the websocket and re-baked into the actual strip image, not just a CSS preview;
+  the strip stays editable for as long as you want to keep tweaking it. The photos are
+  rendered as warm, drop-shadowed instant-film polaroids on a cozy fairy-light backdrop.
 - Download the strip as a PNG or an animated GIF "clip," or retake it entirely.
 
 ### The synchronization mechanism

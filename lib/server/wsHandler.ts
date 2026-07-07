@@ -95,7 +95,8 @@ async function handleFrameComplete(room: Room, round: number): Promise<void> {
       round,
       data.hostFrame,
       data.guestFrame,
-      room.selectedFilter
+      room.selectedFilter,
+      room.backgroundBlur
     );
     data.compositeBuffer = buffer;
     data.compositeUrl = url;
@@ -172,7 +173,8 @@ async function regradeStrip(room: Room): Promise<void> {
         round,
         data.hostFrame,
         data.guestFrame,
-        room.selectedFilter
+        room.selectedFilter,
+        room.backgroundBlur
       );
       data.compositeBuffer = buffer;
       data.compositeUrl = url;
@@ -283,6 +285,7 @@ export function attachWebSocketServer(server: HttpServer): void {
       state: room.state,
       selectedFilter: room.selectedFilter,
       selectedLayout: room.selectedLayout,
+      backgroundBlur: room.backgroundBlur,
       caption: room.caption,
     });
 
@@ -374,6 +377,17 @@ export function attachWebSocketServer(server: HttpServer): void {
           // Cheap regenerate (like caption) — layout only re-arranges
           // already-composited round images, no filter reprocessing needed.
           if (room.state === "revealed") scheduleCheapRegrade(room);
+          break;
+        }
+
+        case "set-background-blur": {
+          if (typeof message.enabled !== "boolean") break;
+          if (room.state !== "lobby" && room.state !== "ready" && room.state !== "revealed") break;
+          room.backgroundBlur = message.enabled;
+          broadcast(room, { type: "background-blur-changed", enabled: message.enabled });
+          // Blur is baked per-round tile, so it needs the full regrade path
+          // (re-run the per-round pipeline), same as a filter change.
+          if (room.state === "revealed") void regradeStrip(room);
           break;
         }
 

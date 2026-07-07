@@ -38,6 +38,7 @@ export type ClientMessage =
   | { type: "retake" }
   | { type: "select-filter"; filterId: FilterId }
   | { type: "select-layout"; layout: PolaroidLayout }
+  | { type: "set-background-blur"; enabled: boolean }
   | { type: "set-caption"; caption: string };
 
 export const CAPTION_MAX_LENGTH = 80;
@@ -52,12 +53,14 @@ export type ServerMessage =
       state: RoomState;
       selectedFilter: FilterId;
       selectedLayout: PolaroidLayout;
+      backgroundBlur: boolean;
       caption: string;
     }
   | { type: "peer-joined" }
   | { type: "peer-left" }
   | { type: "filter-selected"; filterId: FilterId }
   | { type: "layout-selected"; layout: PolaroidLayout }
+  | { type: "background-blur-changed"; enabled: boolean }
   | { type: "caption-updated"; caption: string }
   // Distinct from "compositing": that phase covers the initial capture
   // flow. This one fires when an already-revealed strip is being

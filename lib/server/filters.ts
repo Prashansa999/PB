@@ -34,11 +34,16 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
     modulate: { brightness: 1.015, saturation: 1.05 },
     linear: { a: 1.03, b: -2 },
   },
+  // The default look. Warm, soft, gently faded instant-film — the cozy
+  // Instax-on-fairy-lights aesthetic, tuned to flatter skin and feel like a
+  // keepsake, not a webcam grab. A hair warmer and softer than a phone
+  // photo, but still natural, never heavy-handed.
   film: {
-    modulate: { brightness: 1.02, saturation: 0.94 },
-    tint: { r: 255, g: 248, b: 240 },
-    grainAlpha: 0.03,
-    vignetteStrength: 0.06,
+    modulate: { brightness: 1.04, saturation: 0.99 },
+    tint: { r: 255, g: 243, b: 230 },
+    linear: { a: 0.95, b: 9 }, // lift the blacks slightly for that soft film fade
+    grainAlpha: 0.04,
+    vignetteStrength: 0.11,
   },
   retro: {
     modulate: { brightness: 1.03, saturation: 1.08, hue: -4 },

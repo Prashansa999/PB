@@ -34,16 +34,16 @@ export interface FilterMeta {
 
 export const PHOTOBOOTH_FILTERS: FilterMeta[] = [
   {
+    id: "film",
+    label: "Film",
+    description: "Warm, soft instant-film glow — the cozy default. 🤍",
+    cssPreview: "sepia(0.14) saturate(0.99) contrast(0.97) brightness(1.04)",
+  },
+  {
     id: "none",
     label: "Original",
     description: "A natural, true-to-life look — clean and unfiltered.",
     cssPreview: "contrast(1.03) saturate(1.05) brightness(1.015)",
-  },
-  {
-    id: "film",
-    label: "Film",
-    description: "Soft and warm, barely-there grain — like a nice point-and-shoot.",
-    cssPreview: "contrast(1.02) saturate(0.94) brightness(1.02)",
   },
   {
     id: "retro",

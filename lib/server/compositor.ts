@@ -16,6 +16,11 @@ const TILE_HEIGHT = 480;
 const GUTTER = 8;
 const BORDER = 16;
 
+// Warm off-white instant-film paper stock — not pure #fff, which reads
+// digital/clinical. This tint is what makes the frames feel like real
+// Instax rather than screenshots on a white div.
+const PAPER = { r: 255, g: 253, b: 248 };
+
 async function ensureRoomDir(code: string): Promise<string> {
   const dir = path.join(STORAGE_ROOT, code);
   await mkdir(dir, { recursive: true });
@@ -31,16 +36,54 @@ export function decodeCapturedFrame(dataUrl: string): Buffer {
   return dataUrlToBuffer(dataUrl);
 }
 
-async function centerCropToTile(input: Buffer, filterId: FilterId): Promise<Buffer> {
-  const cropped = await sharp(input)
+/** Portrait-mode-ish background blur without ML: a soft radial focus that
+ * keeps the center of the tile (where a photobooth subject sits) sharp and
+ * blurs outward. Works per-tile — each person is roughly centered in their
+ * own half of the frame, so their own background softens while they stay
+ * crisp. Reliable and offline (no segmentation model), which is why it's an
+ * option rather than trying to be true person-cutout portrait mode. */
+async function applyBackgroundBlur(tile: Buffer): Promise<Buffer> {
+  const blurred = await sharp(tile).blur(9).toBuffer();
+
+  // A radial mask: opaque white over the central subject area, fading to
+  // transparent toward the edges. Used as a dest-in mask so only the sharp
+  // center survives, composited over the fully-blurred base.
+  const mask = Buffer.from(
+    `<svg width="${TILE_WIDTH}" height="${TILE_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="focus" cx="50%" cy="46%" r="62%">
+          <stop offset="0%" stop-color="#fff" stop-opacity="1" />
+          <stop offset="55%" stop-color="#fff" stop-opacity="1" />
+          <stop offset="100%" stop-color="#fff" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <rect width="${TILE_WIDTH}" height="${TILE_HEIGHT}" fill="url(#focus)" />
+    </svg>`
+  );
+
+  const sharpCenter = await sharp(tile)
+    .ensureAlpha()
+    .composite([{ input: await sharp(mask).png().toBuffer(), blend: "dest-in" }])
+    .png()
+    .toBuffer();
+
+  return sharp(blurred).composite([{ input: sharpCenter, blend: "over" }]).png().toBuffer();
+}
+
+async function centerCropToTile(
+  input: Buffer,
+  filterId: FilterId,
+  backgroundBlur: boolean
+): Promise<Buffer> {
+  let tile: Buffer = await sharp(input)
     .rotate() // respect EXIF orientation from mobile cameras
     .resize(TILE_WIDTH, TILE_HEIGHT, { fit: "cover", position: "attention" })
     .toBuffer();
-  // Filter is applied after the crop so grain/vignette generation always
-  // works against the same fixed tile size, regardless of source aspect
-  // ratio — see lib/server/filters.ts for what "none" vs. a real filter
-  // does here.
-  return applyFilter(cropped, filterId);
+  // Order matters: soften the background first (on clean pixels), THEN run
+  // the filter so its grain/vignette lands uniformly over the whole tile
+  // rather than getting smeared by the blur.
+  if (backgroundBlur) tile = await applyBackgroundBlur(tile);
+  return applyFilter(tile, filterId);
 }
 
 /**
@@ -53,11 +96,12 @@ export async function compositeRound(
   round: number,
   hostFrame: Buffer,
   guestFrame: Buffer,
-  filterId: FilterId
+  filterId: FilterId,
+  backgroundBlur: boolean
 ): Promise<{ buffer: Buffer; url: string }> {
   const [hostTile, guestTile] = await Promise.all([
-    centerCropToTile(hostFrame, filterId),
-    centerCropToTile(guestFrame, filterId),
+    centerCropToTile(hostFrame, filterId, backgroundBlur),
+    centerCropToTile(guestFrame, filterId, backgroundBlur),
   ]);
 
   const width = TILE_WIDTH * 2 + GUTTER + BORDER * 2;
@@ -68,7 +112,7 @@ export async function compositeRound(
       width,
       height,
       channels: 3,
-      background: { r: 255, g: 248, b: 240 },
+      background: PAPER,
     },
   })
     .composite([
@@ -85,14 +129,16 @@ export async function compositeRound(
   return { buffer, url: `/api/strip-image/${code}/${filename}` };
 }
 
-const POLAROID_SIDE_MARGIN = 22;
-const POLAROID_TOP_MARGIN = 22;
-const POLAROID_BOTTOM_MARGIN = 88; // the classic instant-photo caption strip
-const POLAROID_CORNER_RADIUS = 10;
-const POLAROID_GAP = 34;
-const CANVAS_PADDING = 60;
-const HEADER_HEIGHT = 76;
-const SHADOW_OFFSET = 7;
+// Instax-mini-style frame proportions: slim, even top/side borders and a
+// noticeably deeper bottom "chin" for the handwritten caption.
+const POLAROID_SIDE_MARGIN = 26;
+const POLAROID_TOP_MARGIN = 26;
+const POLAROID_BOTTOM_MARGIN = 104; // the classic instant-photo caption strip
+const POLAROID_CORNER_RADIUS = 16;
+const POLAROID_GAP = 40;
+const CANVAS_PADDING = 72;
+const HEADER_HEIGHT = 84;
+const SHADOW_OFFSET = 4;
 
 // Per-layout, deterministic (not random) tilt angles and placement
 // constants — deterministic so a given session's arrangement is stable if
@@ -126,16 +172,16 @@ async function buildWhitePolaroidCard(
     const escaped = captionText.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
     const captionSvg = Buffer.from(
       `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
-        <text x="50%" y="58%" text-anchor="middle" dominant-baseline="middle"
-          font-family="'Segoe Script','Bradley Hand','Comic Sans MS',cursive" font-size="30"
-          fill="#4a3626">${escaped}</text>
+        <text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle"
+          font-family="'Segoe Script','Snell Roundhand','Bradley Hand','Comic Sans MS',cursive"
+          font-size="34" fill="#6b4a3a">${escaped}</text>
       </svg>`
     );
     overlays.push({ input: captionSvg, left: 0, top: photoHeight + POLAROID_TOP_MARGIN });
   }
 
   let card = await sharp({
-    create: { width: cardWidth, height: cardHeight, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    create: { width: cardWidth, height: cardHeight, channels: 3, background: PAPER },
   })
     .composite(overlays)
     .png()
@@ -158,14 +204,61 @@ async function buildWhitePolaroidCard(
 }
 
 async function buildCardShadow(width: number, height: number): Promise<Buffer> {
+  // A soft, warm-neutral drop shadow with generous padding so the heavy
+  // blur doesn't clip at the edges. Lower opacity + larger blur than before
+  // reads as a photo resting on a surface, not a hard cutout.
+  const pad = 40;
   const svg = Buffer.from(
-    `<svg width="${width}" height="${height}"><rect width="${width}" height="${height}"
-      rx="${POLAROID_CORNER_RADIUS}" ry="${POLAROID_CORNER_RADIUS}" fill="black" fill-opacity="0.32"/></svg>`
+    `<svg width="${width + pad * 2}" height="${height + pad * 2}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="${pad}" y="${pad}" width="${width}" height="${height}"
+        rx="${POLAROID_CORNER_RADIUS}" ry="${POLAROID_CORNER_RADIUS}"
+        fill="#3a2418" fill-opacity="0.24"/></svg>`
   );
   return sharp(await sharp(svg).png().toBuffer())
-    .blur(9)
+    .blur(22)
     .png()
     .toBuffer();
+}
+
+// Deterministic pseudo-random from an integer seed — keeps the bokeh
+// backdrop stable across regenerations of the same strip.
+function seeded(n: number): number {
+  const x = Math.sin(n * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** A cozy, softly-lit backdrop for the whole strip: a warm vertical
+ * gradient with scattered out-of-focus golden "fairy light" bokeh, echoing
+ * the string-light photos couples actually pin their instants over. */
+function buildBackdrop(width: number, height: number): Buffer {
+  const dots: string[] = [];
+  const count = Math.max(10, Math.round((width * height) / 90000));
+  for (let i = 0; i < count; i++) {
+    const cx = seeded(i * 3 + 1) * width;
+    const cy = seeded(i * 3 + 2) * height;
+    const r = 14 + seeded(i * 3 + 3) * 46;
+    const op = 0.18 + seeded(i * 7 + 5) * 0.4;
+    dots.push(
+      `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="url(#glow)" opacity="${op.toFixed(2)}"/>`
+    );
+  }
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#fdf0e6"/>
+        <stop offset="55%" stop-color="#f9e6d6"/>
+        <stop offset="100%" stop-color="#f3dcc8"/>
+      </linearGradient>
+      <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ffe9b8" stop-opacity="1"/>
+        <stop offset="45%" stop-color="#ffd98a" stop-opacity="0.7"/>
+        <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    ${dots.join("\n")}
+  </svg>`;
+  return Buffer.from(svg);
 }
 
 async function rotateWithTransparentPadding(
@@ -290,13 +383,21 @@ export async function assembleFinalStrip(
 
   const { width, height, placements } = computeLayout(layout, rotated);
 
+  const dateLabel = new Date().toLocaleDateString(undefined, { month: "long", day: "numeric" });
   const headerSvg = Buffer.from(
     `<svg width="${width}" height="${HEADER_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-      <text x="50%" y="65%" text-anchor="middle" font-family="Georgia, serif"
-        font-size="34" font-weight="700" fill="#c2410c">S P Photobooth 🩷</text>
+      <text x="50%" y="46%" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
+        font-size="34" font-weight="700" fill="#b45309">us, together 🤍</text>
+      <text x="50%" y="80%" text-anchor="middle"
+        font-family="'Segoe Script','Snell Roundhand','Bradley Hand',cursive"
+        font-size="20" fill="#a8836a">${dateLabel} · at the same second</text>
     </svg>`
   );
 
+  // The shadow padding (see buildCardShadow) means the shadow buffer is
+  // larger than the card by `pad` on every side; offset it back by that pad
+  // so the shadow sits centered under the card rather than down-right of it.
+  const shadowPad = 40;
   const composites: { input: Buffer; left: number; top: number }[] = [
     { input: headerSvg, left: 0, top: 0 },
   ];
@@ -305,13 +406,15 @@ export async function assembleFinalStrip(
     // Shadow immediately followed by its own card, per card — not all
     // shadows then all cards — so overlapping cards (collage/stack) layer
     // correctly instead of every shadow sitting under every card.
-    composites.push({ input: shadows[i], left: left + SHADOW_OFFSET, top: top + SHADOW_OFFSET });
+    composites.push({
+      input: shadows[i],
+      left: left - shadowPad + SHADOW_OFFSET,
+      top: top - shadowPad + SHADOW_OFFSET,
+    });
     composites.push({ input: rotated[i].buffer, left, top });
   }
 
-  const buffer = await sharp({
-    create: { width, height, channels: 3, background: { r: 255, g: 248, b: 240 } },
-  })
+  const buffer = await sharp(buildBackdrop(width, height))
     .composite(composites)
     .png()
     .toBuffer();

@@ -23,6 +23,7 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
     retryCamera,
     selectFilter,
     selectLayout,
+    setBackgroundBlur,
     setCaption,
   } = useRoomSession(code, role);
   const [copied, setCopied] = useState(false);
@@ -130,7 +131,7 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                   {state.phase === "compositing" && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                       <p className="animate-pulse rounded-full bg-white/90 px-6 py-3 font-medium text-accent-strong">
-                        Developing your strip…
+                        Developing your polaroids… 🤍
                       </p>
                     </div>
                   )}
@@ -157,6 +158,16 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
 
             {state.phase === "revealed" && state.stripUrl && (
               <>
+                {/* Cozy warm glow behind the reveal — the fairy-lights vibe,
+                    without touching the capture screens. */}
+                <div
+                  aria-hidden
+                  className="pointer-events-none fixed inset-0 -z-10"
+                  style={{
+                    background:
+                      "radial-gradient(1100px 700px at 50% 8%, rgba(255,223,170,0.55), transparent 60%), radial-gradient(700px 500px at 12% 90%, rgba(255,196,150,0.35), transparent 65%), radial-gradient(700px 500px at 88% 80%, rgba(255,208,175,0.32), transparent 65%)",
+                  }}
+                />
                 {showHeartBurst && <HeartBurst />}
                 <StripReveal
                   stripUrl={state.stripUrl}
@@ -166,8 +177,10 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                   regrading={state.regradingStrip}
                   selectedFilter={state.selectedFilter}
                   selectedLayout={state.selectedLayout}
+                  backgroundBlur={state.backgroundBlur}
                   onSelectFilter={selectFilter}
                   onSelectLayout={selectLayout}
+                  onSetBackgroundBlur={setBackgroundBlur}
                   onSetCaption={setCaption}
                   onRetake={retake}
                 />
@@ -301,8 +314,10 @@ function StripReveal({
   regrading,
   selectedFilter,
   selectedLayout,
+  backgroundBlur,
   onSelectFilter,
   onSelectLayout,
+  onSetBackgroundBlur,
   onSetCaption,
   onRetake,
 }: {
@@ -313,8 +328,10 @@ function StripReveal({
   regrading: boolean;
   selectedFilter: FilterId;
   selectedLayout: PolaroidLayout;
+  backgroundBlur: boolean;
   onSelectFilter: (id: FilterId) => void;
   onSelectLayout: (layout: PolaroidLayout) => void;
+  onSetBackgroundBlur: (enabled: boolean) => void;
   onSetCaption: (caption: string) => void;
   onRetake: () => void;
 }) {
@@ -343,11 +360,12 @@ function StripReveal({
 
   return (
     <div className="flex w-full max-w-sm flex-col items-center">
-      <h1 className="mb-1 text-center text-2xl font-bold font-[family-name:var(--font-display)]">
-        You did it — together. 🩷
+      <h1 className="mb-1 text-center text-3xl font-bold font-[family-name:var(--font-display)]">
+        us, together 🤍
       </h1>
+      <p className="mb-3 text-center text-sm opacity-60">Four little moments, one second apart.</p>
       {regrading && (
-        <p className="mb-2 animate-pulse text-xs font-medium text-accent-strong">Updating your strip…</p>
+        <p className="mb-2 animate-pulse text-xs font-medium text-accent-strong">Updating your polaroids…</p>
       )}
 
       <PolaroidStrip
@@ -380,6 +398,24 @@ function StripReveal({
         <p className="text-center text-sm font-semibold text-accent-strong">Make it yours</p>
         <FilterPicker photoUrl={previewPhotoUrl} selectedFilter={selectedFilter} onSelect={handleSelectFilter} />
         <LayoutPicker selectedLayout={selectedLayout} onSelect={onSelectLayout} />
+
+        <label className="mt-5 flex cursor-pointer items-center justify-between gap-3">
+          <span className="text-sm font-medium opacity-70">
+            Blur the background 🌸
+            <span className="block text-xs opacity-60">Soft focus that keeps you two sharp.</span>
+          </span>
+          <span className="relative inline-flex shrink-0">
+            <input
+              type="checkbox"
+              checked={backgroundBlur}
+              onChange={(e) => onSetBackgroundBlur(e.target.checked)}
+              className="peer sr-only"
+            />
+            <span className="h-6 w-11 rounded-full bg-border transition peer-checked:bg-accent" />
+            <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+          </span>
+        </label>
+
         <CaptionField caption={caption} onChange={onSetCaption} />
       </div>
 

@@ -48,6 +48,7 @@ export interface RoomSessionState {
   unsupportedReason: string | null;
   selectedFilter: FilterId;
   selectedLayout: PolaroidLayout;
+  backgroundBlur: boolean;
   caption: string;
   regradingStrip: boolean;
 }
@@ -77,8 +78,9 @@ const initialState: RoomSessionState = {
   clipUrl: null,
   errorMessage: null,
   unsupportedReason: null,
-  selectedFilter: "none",
+  selectedFilter: "film",
   selectedLayout: "strip",
+  backgroundBlur: false,
   caption: "",
   regradingStrip: false,
 };
@@ -111,6 +113,7 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             phase: "lobby-waiting",
             selectedFilter: msg.selectedFilter,
             selectedLayout: msg.selectedLayout,
+            backgroundBlur: msg.backgroundBlur,
             caption: msg.caption,
           };
         case "peer-joined":
@@ -121,6 +124,8 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
           return { ...state, selectedFilter: msg.filterId };
         case "layout-selected":
           return { ...state, selectedLayout: msg.layout };
+        case "background-blur-changed":
+          return { ...state, backgroundBlur: msg.enabled };
         case "caption-updated":
           return { ...state, caption: msg.caption };
         case "regrading":
@@ -136,15 +141,22 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             countdownTFire: msg.tFire,
             countdownVisibleAt: msg.tCountdownVisibleAt,
           };
-        case "round-captured":
+        case "round-captured": {
+          // After the *last* round there is no "next one" — jumping to the
+          // round-breather prep ("get ready…") makes it look like a 5th
+          // photo is coming before the reveal lands. Go straight to the
+          // developing/compositing state instead so the count ends cleanly
+          // at exactly totalRounds.
+          const isLastRound = msg.round >= state.totalRounds - 1;
           return {
             ...state,
-            phase: "round-breather",
+            phase: isLastRound ? "compositing" : "round-breather",
             roundResults: [
               ...state.roundResults.filter((r) => r.round !== msg.round),
               { round: msg.round, compositeUrl: msg.compositeUrl, skewMs: msg.skewMs },
             ],
           };
+        }
         case "compositing":
           return { ...state, phase: "compositing" };
         case "reveal":
@@ -167,6 +179,7 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             // lie about what the next strip will actually use.
             selectedFilter: state.selectedFilter,
             selectedLayout: state.selectedLayout,
+            backgroundBlur: state.backgroundBlur,
             caption: state.caption,
           };
         case "error":
@@ -474,6 +487,13 @@ export function useRoomSession(code: string, role: Role) {
     [sendMessage]
   );
 
+  const setBackgroundBlur = useCallback(
+    (enabled: boolean) => {
+      sendMessage({ type: "set-background-blur", enabled });
+    },
+    [sendMessage]
+  );
+
   const setCaption = useCallback(
     (caption: string) => {
       sendMessage({ type: "set-caption", caption });
@@ -490,6 +510,7 @@ export function useRoomSession(code: string, role: Role) {
     retryCamera,
     selectFilter,
     selectLayout,
+    setBackgroundBlur,
     setCaption,
   };
 }

@@ -31,18 +31,18 @@ function Card({
 }) {
   return (
     <div
-      className="polaroid-card rounded-md bg-white p-3 pb-6 shadow-[0_10px_24px_-8px_rgba(0,0,0,0.35)]"
-      style={style}
+      className="polaroid-card rounded-[14px] p-3 pb-8 shadow-[0_18px_40px_-12px_rgba(58,36,24,0.45)]"
+      style={{ backgroundColor: "#fffdf8", ...style }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- server-generated, non-static asset */}
       <img
         src={compositeUrl}
         alt={`Photo ${round + 1}`}
-        className="w-64 rounded-sm sm:w-72"
+        className="w-64 rounded-[3px] sm:w-72"
         style={{ filter: cssFilterPreview }}
       />
       {isLast && caption && (
-        <p className="mt-3 text-center font-[family-name:var(--font-display)] text-base italic text-[#4a3626]">
+        <p className="mt-3 text-center text-lg text-[#6b4a3a] [font-family:'Segoe_Script','Snell_Roundhand','Bradley_Hand',cursive]">
           {caption}
         </p>
       )}
