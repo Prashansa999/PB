@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fff8f0;
+  --foreground: #2b1c12;
+  --accent: #c2410c;
+  --accent-soft: #fed7aa;
+  --accent-strong: #9a3412;
+  --sync: #6d28d9;
+  --card: #fffaf3;
+  --border: #f3ddc4;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-strong: var(--accent-strong);
+  --color-sync: var(--sync);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1b140f;
+    --foreground: #f8ead9;
+    --accent: #fb923c;
+    --accent-soft: #4a2c17;
+    --accent-strong: #fdba74;
+    --sync: #c4b5fd;
+    --card: #241a13;
+    --border: #3a2a1c;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+@keyframes flash-pop {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.flash-overlay {
+  animation: flash-pop 400ms ease-out;
+}
+
+@keyframes strip-unfurl {
+  from {
+    transform: translateY(-24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.strip-reveal {
+  animation: strip-unfurl 700ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes countdown-beat {
+  0% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.countdown-beat {
+  animation: countdown-beat 1s ease-out;
+}
