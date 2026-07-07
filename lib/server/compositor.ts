@@ -2,6 +2,8 @@ import sharp from "sharp";
 import GIFEncoder from "gif-encoder-2";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
+import { applyFilter } from "./filters";
+import type { FilterId } from "../shared/filters";
 
 const STORAGE_ROOT = path.join(process.cwd(), "storage", "strips");
 
@@ -28,11 +30,16 @@ export function decodeCapturedFrame(dataUrl: string): Buffer {
   return dataUrlToBuffer(dataUrl);
 }
 
-async function centerCropToTile(input: Buffer): Promise<Buffer> {
-  return sharp(input)
+async function centerCropToTile(input: Buffer, filterId: FilterId): Promise<Buffer> {
+  const cropped = await sharp(input)
     .rotate() // respect EXIF orientation from mobile cameras
     .resize(TILE_WIDTH, TILE_HEIGHT, { fit: "cover", position: "attention" })
     .toBuffer();
+  // Filter is applied after the crop so grain/vignette generation always
+  // works against the same fixed tile size, regardless of source aspect
+  // ratio — see lib/server/filters.ts for what "none" vs. a real filter
+  // does here.
+  return applyFilter(cropped, filterId);
 }
 
 /**
@@ -44,11 +51,12 @@ export async function compositeRound(
   code: string,
   round: number,
   hostFrame: Buffer,
-  guestFrame: Buffer
+  guestFrame: Buffer,
+  filterId: FilterId
 ): Promise<{ buffer: Buffer; url: string }> {
   const [hostTile, guestTile] = await Promise.all([
-    centerCropToTile(hostFrame),
-    centerCropToTile(guestFrame),
+    centerCropToTile(hostFrame, filterId),
+    centerCropToTile(guestFrame, filterId),
   ]);
 
   const width = TILE_WIDTH * 2 + GUTTER + BORDER * 2;

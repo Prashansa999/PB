@@ -22,6 +22,7 @@ import {
   type ServerMessage,
   type Role,
 } from "../shared/protocol";
+import { isFilterId } from "../shared/filters";
 
 const DEFAULT_ROUND_TRIP_MS = 150;
 const MAX_LEAD_MS = 8000;
@@ -81,7 +82,13 @@ async function handleFrameComplete(room: Room, round: number): Promise<void> {
   );
 
   try {
-    const { buffer, url } = await compositeRound(room.code, round, data.hostFrame, data.guestFrame);
+    const { buffer, url } = await compositeRound(
+      room.code,
+      round,
+      data.hostFrame,
+      data.guestFrame,
+      room.selectedFilter
+    );
     data.compositeBuffer = buffer;
     data.compositeUrl = url;
 
@@ -186,7 +193,13 @@ export function attachWebSocketServer(server: HttpServer): void {
     touchRoom(room);
     contexts.set(ws, { code, role: requestedRole });
 
-    send(ws, { type: "welcome", role: requestedRole, code, state: room.state });
+    send(ws, {
+      type: "welcome",
+      role: requestedRole,
+      code,
+      state: room.state,
+      selectedFilter: room.selectedFilter,
+    });
 
     if (room.host && room.guest) {
       if (room.state === "lobby") room.state = "ready";
@@ -250,6 +263,18 @@ export function attachWebSocketServer(server: HttpServer): void {
             roundData.guestCapturedAtServer = capturedAtServer;
           }
           void handleFrameComplete(room, message.round);
+          break;
+        }
+
+        case "select-filter": {
+          // Only a pre-countdown decision — once round 0 has started,
+          // changing it mid-strip would mean the strip doesn't match what
+          // either partner saw agreed on. Retaking resets state back to
+          // "ready" without clearing selectedFilter, so the choice persists.
+          if (!isFilterId(message.filterId)) break;
+          if (room.state !== "lobby" && room.state !== "ready") break;
+          room.selectedFilter = message.filterId;
+          broadcast(room, { type: "filter-selected", filterId: message.filterId });
           break;
         }
 

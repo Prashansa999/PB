@@ -4,14 +4,28 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRoomSession } from "@/lib/client/useRoomSession";
 import type { Role, MagnetAddress } from "@/lib/shared/protocol";
+import { PHOTOBOOTH_FILTERS } from "@/lib/shared/filters";
 import { CountdownOverlay } from "./_components/CountdownOverlay";
 import { MagnetOrderForm } from "./_components/MagnetOrderForm";
+import { FilterPicker } from "./_components/FilterPicker";
 
 export function PhotoboothSession({ code, role }: { code: string; role: Role }) {
-  const { state, localVideoRef, remoteVideoRef, startCountdown, retake, retryCamera, orderMagnet } =
-    useRoomSession(code, role);
+  const {
+    state,
+    localVideoRef,
+    remoteVideoRef,
+    localStream,
+    startCountdown,
+    retake,
+    retryCamera,
+    selectFilter,
+    orderMagnet,
+  } = useRoomSession(code, role);
   const [showMagnetForm, setShowMagnetForm] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const activeFilterCss =
+    PHOTOBOOTH_FILTERS.find((f) => f.id === state.selectedFilter)?.cssPreview ?? "none";
 
   async function shareCode() {
     const url = `${window.location.origin}/room/${code}`;
@@ -87,8 +101,14 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                 <RoundIndicator current={state.currentRound} total={state.totalRounds} phase={state.phase} />
 
                 <div className="relative mt-4 grid grid-cols-2 gap-3 overflow-hidden rounded-3xl border-8 border-card bg-black p-2 shadow-2xl">
-                  <VideoTile videoRef={localVideoRef} label="You" mirrored muted />
-                  <VideoTile videoRef={remoteVideoRef} label="Them" mirrored={false} muted={false} />
+                  <VideoTile videoRef={localVideoRef} label="You" mirrored muted cssFilter={activeFilterCss} />
+                  <VideoTile
+                    videoRef={remoteVideoRef}
+                    label="Them"
+                    mirrored={false}
+                    muted={false}
+                    cssFilter={activeFilterCss}
+                  />
 
                   {state.flashing && (
                     <div className="flash-overlay pointer-events-none absolute inset-0 bg-white" />
@@ -113,19 +133,32 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                 </div>
 
                 {state.phase === "ready" && (
-                  <div className="mt-6 flex justify-center">
-                    <button
-                      onClick={startCountdown}
-                      className="rounded-full bg-accent px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-accent/20 transition hover:brightness-110"
-                    >
-                      Start countdown
-                    </button>
-                  </div>
+                  <>
+                    <FilterPicker
+                      stream={localStream}
+                      selectedFilter={state.selectedFilter}
+                      onSelect={selectFilter}
+                    />
+                    <div className="mt-6 flex justify-center">
+                      <button
+                        onClick={startCountdown}
+                        className="rounded-full bg-accent px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-accent/20 transition hover:brightness-110"
+                      >
+                        Start countdown
+                      </button>
+                    </div>
+                  </>
                 )}
 
                 {state.phase === "round-breather" && (
                   <p className="mt-6 text-center text-sm opacity-70">
                     Got it! Get ready for the next one…
+                  </p>
+                )}
+
+                {state.phase !== "ready" && state.selectedFilter !== "none" && (
+                  <p className="mt-4 text-center text-xs opacity-50">
+                    Filter: {PHOTOBOOTH_FILTERS.find((f) => f.id === state.selectedFilter)?.label}
                   </p>
                 )}
               </div>
@@ -216,11 +249,13 @@ function VideoTile({
   label,
   mirrored,
   muted,
+  cssFilter,
 }: {
   videoRef: (node: HTMLVideoElement | null) => void;
   label: string;
   mirrored: boolean;
   muted: boolean;
+  cssFilter?: string;
 }) {
   return (
     <div className="relative aspect-square overflow-hidden rounded-2xl bg-zinc-900">
@@ -230,7 +265,10 @@ function VideoTile({
         playsInline
         muted={muted}
         className="h-full w-full object-cover"
-        style={mirrored ? { transform: "scaleX(-1)" } : undefined}
+        style={{
+          transform: mirrored ? "scaleX(-1)" : undefined,
+          filter: cssFilter,
+        }}
       />
       <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-xs text-white">
         {label}

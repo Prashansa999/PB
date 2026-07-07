@@ -1,6 +1,7 @@
 import type { WebSocket } from "ws";
 import { generateRoomCode } from "../shared/roomCode";
 import { TOTAL_ROUNDS, type RoomState } from "../shared/protocol";
+import type { FilterId } from "../shared/filters";
 
 export interface ConnectedPeer {
   ws: WebSocket;
@@ -31,6 +32,10 @@ export interface Room {
   rounds: RoundData[];
   finalStripUrl: string | null;
   finalClipUrl: string | null;
+  // A shared, synced choice (see wsHandler's "select-filter" handling) —
+  // deliberately not a per-client preference, so both partners' strips
+  // always match.
+  selectedFilter: FilterId;
 }
 
 const rooms = new Map<string, Room>();
@@ -62,6 +67,7 @@ export function createRoom(): Room {
     rounds: freshRounds(TOTAL_ROUNDS),
     finalStripUrl: null,
     finalClipUrl: null,
+    selectedFilter: "none",
   };
   rooms.set(code, room);
   return room;

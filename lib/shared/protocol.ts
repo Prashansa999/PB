@@ -2,6 +2,8 @@
 // custom Node server (server.ts). Keeping this in one file means both
 // sides fail to compile if a message shape drifts out of sync.
 
+import type { FilterId } from "./filters";
+
 export type Role = "host" | "guest";
 
 export type RoomState =
@@ -33,6 +35,7 @@ export type ClientMessage =
       capturedAtLocal: number;
     }
   | { type: "retake" }
+  | { type: "select-filter"; filterId: FilterId }
   | { type: "order-magnet"; addressHost: MagnetAddress; addressGuest: MagnetAddress };
 
 export interface MagnetAddress {
@@ -48,9 +51,10 @@ export interface MagnetAddress {
 // ---------- Server -> Client ----------
 
 export type ServerMessage =
-  | { type: "welcome"; role: Role; code: string; state: RoomState }
+  | { type: "welcome"; role: Role; code: string; state: RoomState; selectedFilter: FilterId }
   | { type: "peer-joined" }
   | { type: "peer-left" }
+  | { type: "filter-selected"; filterId: FilterId }
   | { type: "clock-sync-pong"; id: string; t0: number; t1: number; t2: number }
   | { type: "signal"; payload: unknown }
   | {

@@ -10,6 +10,7 @@ import type {
   ServerMessage,
 } from "../shared/protocol";
 import { TOTAL_ROUNDS } from "../shared/protocol";
+import type { FilterId } from "../shared/filters";
 
 const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 const CLOCK_RESYNC_INTERVAL_MS = 15_000;
@@ -50,6 +51,7 @@ export interface RoomSessionState {
   errorMessage: string | null;
   magnetOrderId: string | null;
   unsupportedReason: string | null;
+  selectedFilter: FilterId;
 }
 
 type Action =
@@ -78,6 +80,7 @@ const initialState: RoomSessionState = {
   errorMessage: null,
   magnetOrderId: null,
   unsupportedReason: null,
+  selectedFilter: "none",
 };
 
 function reducer(state: RoomSessionState, action: Action): RoomSessionState {
@@ -102,11 +105,18 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
       const msg = action.message;
       switch (msg.type) {
         case "welcome":
-          return { ...state, role: msg.role, phase: "lobby-waiting" };
+          return {
+            ...state,
+            role: msg.role,
+            phase: "lobby-waiting",
+            selectedFilter: msg.selectedFilter,
+          };
         case "peer-joined":
           return { ...state, peerConnected: true, phase: "ready" };
         case "peer-left":
           return { ...state, peerConnected: false, phase: "lobby-waiting" };
+        case "filter-selected":
+          return { ...state, selectedFilter: msg.filterId };
         case "stabilizing":
           return { ...state, phase: "stabilizing" };
         case "countdown-start":
@@ -142,6 +152,11 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             phase: "ready",
             role: state.role,
             peerConnected: state.peerConnected,
+            // The server keeps the chosen filter across a retake (see
+            // resetRoomForRetake) — mirror that here instead of dropping
+            // back to "none", or the picker would silently lie about what
+            // the next strip will actually use.
+            selectedFilter: state.selectedFilter,
           };
         case "magnet-order-confirmed":
           return { ...state, magnetOrderId: msg.orderId };
@@ -170,6 +185,11 @@ export function useRoomSession(code: string, role: Role) {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const cancelScheduleRef = useRef<(() => void) | null>(null);
   const makingOfferRef = useRef(false);
+
+  // Reactive (not just a ref) so the filter picker can bind extra <video>
+  // preview tiles to the same live stream once it exists — a plain ref
+  // wouldn't trigger a re-render when the stream first becomes available.
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
   // The <video> tiles only mount once the UI leaves the loading phases
   // (camera permission / connecting), which happens *after* the camera
@@ -335,6 +355,7 @@ export function useRoomSession(code: string, role: Role) {
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
         dispatch({ type: "WS_CONNECTING" });
         setCameraReady(true);
+        setLocalStream(stream);
       })
       .catch(() => {
         if (!cancelled) dispatch({ type: "CAMERA_DENIED" });
@@ -436,6 +457,13 @@ export function useRoomSession(code: string, role: Role) {
     dispatch({ type: "CAMERA_REQUESTING" });
   }, []);
 
+  const selectFilter = useCallback(
+    (filterId: FilterId) => {
+      sendMessage({ type: "select-filter", filterId });
+    },
+    [sendMessage]
+  );
+
   const orderMagnet = useCallback(
     (addressHost: MagnetAddress, addressGuest: MagnetAddress) => {
       sendMessage({ type: "order-magnet", addressHost, addressGuest });
@@ -447,9 +475,11 @@ export function useRoomSession(code: string, role: Role) {
     state,
     localVideoRef: attachLocalVideo,
     remoteVideoRef: attachRemoteVideo,
+    localStream,
     startCountdown,
     retake,
     retryCamera,
+    selectFilter,
     orderMagnet,
   };
 }
