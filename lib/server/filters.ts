@@ -25,24 +25,32 @@ interface FilterRecipe {
 }
 
 const RECIPES: Record<FilterId, FilterRecipe> = {
-  none: {},
+  // Not a no-op: a very light contrast/clarity/warmth lift, the kind of
+  // invisible processing a phone camera already does before you ever see
+  // the shot. The point is that it reads as "a nice photo," not "a photo
+  // with a filter on it" — no grain, no vignette, nothing you'd notice
+  // unless you compared it side by side with the raw frame.
+  none: {
+    modulate: { brightness: 1.015, saturation: 1.05 },
+    linear: { a: 1.03, b: -2 },
+  },
   film: {
-    modulate: { brightness: 1.03, saturation: 0.85 },
-    tint: { r: 255, g: 244, b: 230 },
-    grainAlpha: 0.06,
-    vignetteStrength: 0.15,
+    modulate: { brightness: 1.02, saturation: 0.94 },
+    tint: { r: 255, g: 248, b: 240 },
+    grainAlpha: 0.03,
+    vignetteStrength: 0.06,
   },
   retro: {
-    modulate: { brightness: 1.05, saturation: 1.15, hue: -6 },
-    tint: { r: 255, g: 230, b: 190 },
-    linear: { a: 0.92, b: 10 },
-    grainAlpha: 0.1,
-    vignetteStrength: 0.25,
+    modulate: { brightness: 1.03, saturation: 1.08, hue: -4 },
+    tint: { r: 255, g: 236, b: 208 },
+    linear: { a: 0.96, b: 5 },
+    grainAlpha: 0.04,
+    vignetteStrength: 0.1,
   },
   noir: {
     greyscale: true,
-    linear: { a: 1.15, b: -10 },
-    vignetteStrength: 0.2,
+    linear: { a: 1.08, b: -5 },
+    vignetteStrength: 0.08,
   },
   sepia: {
     // Deliberately no `greyscale: true` here: sharp's tint() already
@@ -51,45 +59,47 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
     // the image to a 1-channel buffer that tint() then silently no-ops on
     // — cost me a debugging session to find, worth remembering.
     tint: { r: 196, g: 138, b: 76 },
-    linear: { a: 1.08, b: -8 },
+    linear: { a: 1.03, b: -3 },
   },
   dreamy: {
-    modulate: { brightness: 1.12, saturation: 0.9 },
-    linear: { a: 0.88, b: 15 },
-    grainAlpha: 0.03,
-    vignetteStrength: 0.1,
+    modulate: { brightness: 1.07, saturation: 0.95 },
+    linear: { a: 0.94, b: 6 },
+    grainAlpha: 0.015,
+    vignetteStrength: 0.04,
   },
   vivid: {
-    modulate: { brightness: 1.03, saturation: 1.5 },
-    linear: { a: 1.1, b: -5 },
+    modulate: { brightness: 1.02, saturation: 1.22 },
+    linear: { a: 1.04, b: -2 },
   },
   flash: {
-    modulate: { brightness: 1.2, saturation: 1.05 },
-    linear: { a: 1.08, b: 0 },
-    grainAlpha: 0.08,
-    vignetteStrength: 0.05,
+    modulate: { brightness: 1.1, saturation: 1.03 },
+    linear: { a: 1.03, b: 0 },
+    grainAlpha: 0.03,
+    vignetteStrength: 0.02,
   },
   // The next two are a style homage to Christopher Doyle's cinematography
   // on Chungking Express / Fallen Angels: pushed, grainy 35mm, saturated
   // neon color with crushed contrast — not a copy of any frame from the
   // film, just the same *kind* of grade (the way "film" or "noir" above
-  // are genres, not specific stocks or movies).
+  // are genres, not specific stocks or movies). Kept restrained rather
+  // than pushed to the extreme of the source material — the goal here is
+  // still a photo people want to keep, not a screengrab.
   chungking: {
-    modulate: { brightness: 0.97, saturation: 1.4, hue: 6 },
-    linear: { a: 1.22, b: -18 },
-    wash: { r: 255, g: 140, b: 60, alpha: 0.14, blend: "soft-light" },
-    grainAlpha: 0.14,
-    vignetteStrength: 0.3,
+    modulate: { brightness: 0.99, saturation: 1.18, hue: 3 },
+    linear: { a: 1.1, b: -8 },
+    wash: { r: 255, g: 140, b: 60, alpha: 0.07, blend: "soft-light" },
+    grainAlpha: 0.06,
+    vignetteStrength: 0.14,
   },
   neon: {
-    modulate: { brightness: 0.96, saturation: 1.45, hue: 8 },
-    linear: { a: 1.22, b: -18 },
-    wash: { r: 255, g: 100, b: 160, alpha: 0.12, blend: "soft-light" },
-    grainAlpha: 0.12,
-    vignetteStrength: 0.28,
+    modulate: { brightness: 0.98, saturation: 1.2, hue: 4 },
+    linear: { a: 1.1, b: -8 },
+    wash: { r: 255, g: 100, b: 160, alpha: 0.06, blend: "soft-light" },
+    grainAlpha: 0.05,
+    vignetteStrength: 0.13,
     streak: [
-      { dx: 6, dy: 3, alpha: 0.22 },
-      { dx: 13, dy: 6, alpha: 0.12 },
+      { dx: 5, dy: 2, alpha: 0.14 },
+      { dx: 10, dy: 4, alpha: 0.07 },
     ],
   },
 };
@@ -143,7 +153,7 @@ async function buildWash(
  * just a cheap approximation of this for the live camera view. */
 export async function applyFilter(input: Buffer, filterId: FilterId): Promise<Buffer> {
   const recipe = RECIPES[filterId];
-  if (!recipe || filterId === "none") return input;
+  if (!recipe) return input;
 
   let pipeline = sharp(input);
   // tint() already desaturates-toward-a-hue on its own (see the comment on
