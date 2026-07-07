@@ -2,6 +2,7 @@ import type { WebSocket } from "ws";
 import { generateRoomCode } from "../shared/roomCode";
 import { TOTAL_ROUNDS, type RoomState } from "../shared/protocol";
 import type { FilterId } from "../shared/filters";
+import type { PolaroidLayout } from "../shared/layout";
 
 export interface ConnectedPeer {
   ws: WebSocket;
@@ -36,15 +37,23 @@ export interface Room {
   // deliberately not a per-client preference, so both partners' strips
   // always match.
   selectedFilter: FilterId;
+  // Also shared/synced — how the round photos are arranged into the final
+  // strip image. Same persistence rules as selectedFilter.
+  selectedLayout: PolaroidLayout;
   // Also shared/synced — a short note either partner can write, baked into
   // the strip. Not cleared on retake, same reasoning as selectedFilter.
   caption: string;
   // Bumped every time the strip/clip files on disk are regenerated in
-  // place (filter or caption change after reveal). The filename never
-  // changes, so this gets appended as a `?v=` query param — otherwise the
-  // browser would keep showing a cached copy of the old grade.
+  // place (filter, layout, or caption change after reveal). The filename
+  // never changes, so this gets appended as a `?v=` query param —
+  // otherwise the browser would keep showing a cached copy of the old one.
   revealVersion: number;
-  captionRegradeTimer: ReturnType<typeof setTimeout> | null;
+  // Debounces the *cheap* regenerate path (layout/caption changes, which
+  // only re-arrange already-composited round images) so rapid edits don't
+  // hammer sharp on every keystroke/click. Filter changes are expensive
+  // (re-run the whole per-round pipeline) and always run immediately
+  // instead of through this timer.
+  stripRegradeTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const rooms = new Map<string, Room>();
@@ -77,9 +86,10 @@ export function createRoom(): Room {
     finalStripUrl: null,
     finalClipUrl: null,
     selectedFilter: "none",
+    selectedLayout: "strip",
     caption: "",
     revealVersion: 0,
-    captionRegradeTimer: null,
+    stripRegradeTimer: null,
   };
   rooms.set(code, room);
   return room;
@@ -94,8 +104,8 @@ export function touchRoom(room: Room): void {
 }
 
 export function resetRoomForRetake(room: Room): void {
-  if (room.captionRegradeTimer) clearTimeout(room.captionRegradeTimer);
-  room.captionRegradeTimer = null;
+  if (room.stripRegradeTimer) clearTimeout(room.stripRegradeTimer);
+  room.stripRegradeTimer = null;
   room.state = "ready";
   room.currentRound = 0;
   room.rounds = freshRounds(room.totalRounds);
@@ -105,7 +115,7 @@ export function resetRoomForRetake(room: Room): void {
 
 export function deleteRoom(code: string): void {
   const room = rooms.get(code);
-  if (room?.captionRegradeTimer) clearTimeout(room.captionRegradeTimer);
+  if (room?.stripRegradeTimer) clearTimeout(room.stripRegradeTimer);
   rooms.delete(code);
 }
 

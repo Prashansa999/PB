@@ -37,8 +37,8 @@ const FAQS = [
     a: "Your captured frames stay tied to your private room code and aren't shared publicly. Strips remain downloadable for a limited time after your session.",
   },
   {
-    q: "How does the magnet shipping work?",
-    a: "After your strip is revealed, you can order it printed as a die-cut fridge magnet, shipped to both of you — one for each fridge.",
+    q: "When do we pick a filter?",
+    a: "After you see the photos, not before — so you're choosing based on how they actually turned out, together. You can keep trying different ones (and different layouts) for as long as you want.",
   },
 ];
 
@@ -139,19 +139,24 @@ export default function Home() {
           <div className="grid gap-6 p-8 sm:grid-cols-2 sm:items-center">
             <div>
               <h2 className="text-2xl font-bold font-[family-name:var(--font-display)]">
-                Turn today into something you can hold.
+                Then make it yours.
               </h2>
               <p className="mt-3 text-sm leading-relaxed opacity-80">
-                We print your strip as a die-cut fridge magnet and ship it worldwide —
-                send one to each of you, so the same memory lives on both your fridges.
+                Once you see the photos, pick a filter, arrange them as a strip, a
+                scattered collage, or a fanned-out stack, and write a little note
+                together — all synced live, so you&rsquo;re deciding together, not guessing.
               </p>
             </div>
-            <div className="flex justify-center">
-              <div className="flex h-40 w-28 rotate-[-4deg] flex-col gap-1 rounded-lg border-4 border-white bg-gradient-to-b from-accent-soft to-white p-1 shadow-xl">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="flex-1 rounded bg-accent/20" />
-                ))}
-              </div>
+            <div className="flex justify-center gap-3">
+              {[-6, 4, -3].map((deg, i) => (
+                <div
+                  key={i}
+                  className="flex h-28 w-20 flex-col gap-1 rounded-lg border-4 border-white bg-gradient-to-b from-accent-soft to-white p-1 shadow-xl"
+                  style={{ transform: `rotate(${deg}deg)` }}
+                >
+                  <div className="flex-1 rounded bg-accent/20" />
+                </div>
+              ))}
             </div>
           </div>
         </section>

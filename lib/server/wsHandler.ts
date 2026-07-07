@@ -1,6 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server as HttpServer } from "http";
-import { randomUUID } from "crypto";
 import {
   getRoom,
   touchRoom,
@@ -24,11 +23,14 @@ import {
   type Role,
 } from "../shared/protocol";
 import { isFilterId } from "../shared/filters";
+import { isPolaroidLayout } from "../shared/layout";
 
 const DEFAULT_ROUND_TRIP_MS = 150;
 const MAX_LEAD_MS = 8000;
 const REVEAL_BUFFER_MS = 400;
-const CAPTION_REGRADE_DEBOUNCE_MS = 700;
+// Debounces the *cheap* regenerate path (layout/caption) — see
+// Room.stripRegradeTimer's comment in roomStore.ts.
+const STRIP_REGRADE_DEBOUNCE_MS = 700;
 
 function withVersion(url: string, version: number): string {
   return `${url}?v=${version}`;
@@ -134,7 +136,7 @@ function roundBuffers(room: Room): Buffer[] {
 async function finalizeStrip(room: Room): Promise<void> {
   const buffers = roundBuffers(room);
   const [{ url: stripUrl }, clip] = await Promise.all([
-    assembleFinalStrip(room.code, buffers, room.caption),
+    assembleFinalStrip(room.code, buffers, room.caption, room.selectedLayout),
     assembleClip(room.code, buffers).catch((err) => {
       console.error(`[room ${room.code}] clip generation failed`, err);
       return null;
@@ -186,13 +188,19 @@ async function regradeStrip(room: Room): Promise<void> {
   }
 }
 
-/** Post-reveal caption change: cheaper than a filter regrade — the round
- * composites already reflect the current filter and don't need touching,
- * only the assembled strip (which bakes the caption into the last card)
- * gets rebuilt. The clip never shows the caption, so it's left alone. */
+/** Post-reveal caption or layout change: cheaper than a filter regrade —
+ * the round composites already reflect the current filter and don't need
+ * touching, only the assembled strip (arrangement + caption text) gets
+ * rebuilt. The clip never shows the caption or layout, so it's left
+ * alone. */
 async function regenerateStripOnly(room: Room): Promise<void> {
   try {
-    const { url: stripUrl } = await assembleFinalStrip(room.code, roundBuffers(room), room.caption);
+    const { url: stripUrl } = await assembleFinalStrip(
+      room.code,
+      roundBuffers(room),
+      room.caption,
+      room.selectedLayout
+    );
     room.finalStripUrl = stripUrl;
     room.revealVersion++;
     broadcast(room, {
@@ -204,6 +212,17 @@ async function regenerateStripOnly(room: Room): Promise<void> {
   } catch (err) {
     console.error(`[room ${room.code}] caption regenerate failed`, err);
   }
+}
+
+/** Shared debounce for the cheap regenerate path — caption and layout
+ * changes both go through this so a burst of either (or both) only
+ * triggers one rebuild after things settle down. */
+function scheduleCheapRegrade(room: Room): void {
+  if (room.stripRegradeTimer) clearTimeout(room.stripRegradeTimer);
+  room.stripRegradeTimer = setTimeout(() => {
+    room.stripRegradeTimer = null;
+    void regenerateStripOnly(room);
+  }, STRIP_REGRADE_DEBOUNCE_MS);
 }
 
 interface SocketContext {
@@ -263,6 +282,7 @@ export function attachWebSocketServer(server: HttpServer): void {
       code,
       state: room.state,
       selectedFilter: room.selectedFilter,
+      selectedLayout: room.selectedLayout,
       caption: room.caption,
     });
 
@@ -346,39 +366,34 @@ export function attachWebSocketServer(server: HttpServer): void {
           break;
         }
 
+        case "select-layout": {
+          if (!isPolaroidLayout(message.layout)) break;
+          if (room.state === "countdown" || room.state === "round-active" || room.state === "compositing") break;
+          room.selectedLayout = message.layout;
+          broadcast(room, { type: "layout-selected", layout: message.layout });
+          // Cheap regenerate (like caption) — layout only re-arranges
+          // already-composited round images, no filter reprocessing needed.
+          if (room.state === "revealed") scheduleCheapRegrade(room);
+          break;
+        }
+
         case "set-caption": {
           if (typeof message.caption !== "string") break;
           if (room.state === "countdown" || room.state === "round-active" || room.state === "compositing") break;
           room.caption = message.caption.slice(0, CAPTION_MAX_LENGTH);
           broadcast(room, { type: "caption-updated", caption: room.caption });
 
-          if (room.state === "revealed") {
-            // Debounced: re-rendering the strip on every keystroke would
-            // hammer sharp for no benefit — the live `caption-updated`
-            // broadcast above already keeps both text inputs in sync
-            // instantly, only the baked-in strip image lags slightly.
-            if (room.captionRegradeTimer) clearTimeout(room.captionRegradeTimer);
-            room.captionRegradeTimer = setTimeout(() => {
-              room.captionRegradeTimer = null;
-              void regenerateStripOnly(room);
-            }, CAPTION_REGRADE_DEBOUNCE_MS);
-          }
+          // Debounced: re-rendering the strip on every keystroke would
+          // hammer sharp for no benefit — the live `caption-updated`
+          // broadcast above already keeps both text inputs in sync
+          // instantly, only the baked-in strip image lags slightly.
+          if (room.state === "revealed") scheduleCheapRegrade(room);
           break;
         }
 
         case "retake": {
           resetRoomForRetake(room);
           broadcast(room, { type: "retake-ack" });
-          break;
-        }
-
-        case "order-magnet": {
-          // Demo/mock fulfillment: no real payment or print-vendor call is
-          // wired up. A production build would create a Stripe PaymentIntent
-          // and submit `message.addressHost` / `message.addressGuest` plus
-          // the final strip asset to a print-on-demand order API here.
-          const orderId = randomUUID().slice(0, 8).toUpperCase();
-          broadcast(room, { type: "magnet-order-confirmed", orderId });
           break;
         }
       }

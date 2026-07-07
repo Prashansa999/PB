@@ -12,8 +12,11 @@ build prompt, focused entirely on making the synchronized capture actually work.
 - **Room** (`/room/[code]`) — camera permission, a live WebRTC preview of both people,
   a synchronized 3-2-1 countdown, 4 rounds of capture, server-side compositing into a
   classic photo strip, and a simultaneous reveal.
-- Download the strip as a PNG or an animated GIF "clip," retake, or run a (mock) magnet
-  order flow that collects both partners' shipping addresses.
+- **After the reveal** — not before — either partner can pick a filter, rearrange the
+  photos (strip / collage / stack), and write a shared caption. All three are synced
+  live over the websocket and re-baked into the actual strip image, not just a CSS
+  preview; the strip stays editable for as long as you want to keep tweaking it.
+- Download the strip as a PNG or an animated GIF "clip," or retake it entirely.
 
 ### The synchronization mechanism
 
@@ -53,14 +56,12 @@ Open two browser tabs/windows (or two devices) to `http://localhost:3000`. Start
 session in one, copy the room URL, and open it in the other. Camera permission is
 required in both.
 
-## What's real vs. mocked
+## What's real
 
-- Room/session management, WebRTC signaling, clock sync, the countdown scheduler,
-  capture, server-side compositing (PNG strip + animated GIF clip), and the reveal are
-  all fully implemented and working end to end.
-- The magnet order flow is a **demo checkout**: it collects both shipping addresses and
-  "confirms" an order, but there's no real payment processor or print-vendor
-  integration wired up (see the comment in `lib/server/wsHandler.ts`).
+Room/session management, WebRTC signaling, clock sync, the countdown scheduler,
+capture, server-side compositing (PNG strip + animated GIF clip), post-reveal
+filter/layout/caption edits, and the reveal are all fully implemented and working
+end to end — nothing here is a mocked stand-in.
 
 ## Project layout
 

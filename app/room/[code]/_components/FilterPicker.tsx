@@ -1,33 +1,27 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { PHOTOBOOTH_FILTERS, type FilterId } from "@/lib/shared/filters";
 
-/** One tile: the user's own live camera feed, small, with that filter's CSS
- * approximation applied — a real live preview, not a static icon. Multiple
- * <video> elements can all bind to the same MediaStream simultaneously,
- * which is what makes rendering N of these at once cheap. */
+/** One tile: a real preview of your actual captured photo with that
+ * filter's CSS approximation applied — not a generic icon, not a live
+ * selfie. Since filters are now only ever picked after the strip already
+ * exists, showing the real photo is both truer and cheaper than a live
+ * camera feed would be. */
 function FilterTile({
-  stream,
+  photoUrl,
   filterId,
   label,
   cssPreview,
   selected,
   onSelect,
 }: {
-  stream: MediaStream | null;
+  photoUrl: string | null;
   filterId: FilterId;
   label: string;
   cssPreview: string;
   selected: boolean;
   onSelect: (id: FilterId) => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = stream;
-  }, [stream]);
-
   return (
     <button
       type="button"
@@ -37,14 +31,17 @@ function FilterTile({
       }`}
     >
       <div className="h-16 w-16 overflow-hidden rounded-lg bg-zinc-900">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="h-full w-full object-cover"
-          style={{ transform: "scaleX(-1)", filter: cssPreview }}
-        />
+        {photoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- server-generated, non-static asset
+          <img
+            src={photoUrl}
+            alt={`${label} preview`}
+            className="h-full w-full object-cover"
+            style={{ filter: cssPreview }}
+          />
+        ) : (
+          <div className="h-full w-full" style={{ filter: cssPreview, background: "#8a8f98" }} />
+        )}
       </div>
       <span className={`text-xs font-medium ${selected ? "text-accent-strong" : "opacity-70"}`}>
         {label}
@@ -54,11 +51,11 @@ function FilterTile({
 }
 
 export function FilterPicker({
-  stream,
+  photoUrl,
   selectedFilter,
   onSelect,
 }: {
-  stream: MediaStream | null;
+  photoUrl: string | null;
   selectedFilter: FilterId;
   onSelect: (id: FilterId) => void;
 }) {
@@ -74,7 +71,7 @@ export function FilterPicker({
         {PHOTOBOOTH_FILTERS.map((f) => (
           <FilterTile
             key={f.id}
-            stream={stream}
+            photoUrl={photoUrl}
             filterId={f.id}
             label={f.label}
             cssPreview={f.cssPreview}

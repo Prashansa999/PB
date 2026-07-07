@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRoomSession, type RoundResult } from "@/lib/client/useRoomSession";
-import type { Role, MagnetAddress } from "@/lib/shared/protocol";
+import type { Role } from "@/lib/shared/protocol";
 import { PHOTOBOOTH_FILTERS, type FilterId } from "@/lib/shared/filters";
+import type { PolaroidLayout } from "@/lib/shared/layout";
 import { CountdownOverlay } from "./_components/CountdownOverlay";
-import { MagnetOrderForm } from "./_components/MagnetOrderForm";
 import { FilterPicker } from "./_components/FilterPicker";
+import { LayoutPicker } from "./_components/LayoutPicker";
 import { CaptionField } from "./_components/CaptionField";
 import { HeartBurst } from "./_components/HeartBurst";
 import { PolaroidStrip } from "./_components/PolaroidStrip";
@@ -17,25 +18,20 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
     state,
     localVideoRef,
     remoteVideoRef,
-    localStream,
     startCountdown,
     retake,
     retryCamera,
     selectFilter,
+    selectLayout,
     setCaption,
-    orderMagnet,
   } = useRoomSession(code, role);
-  const [showMagnetForm, setShowMagnetForm] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showHeartBurst, setShowHeartBurst] = useState(false);
   const hasBurstThisSession = useRef(false);
 
-  const activeFilterCss =
-    PHOTOBOOTH_FILTERS.find((f) => f.id === state.selectedFilter)?.cssPreview ?? "none";
-
   // Fire the heart burst once per capture session — the very first reveal,
-  // not every subsequent filter/caption regrade (that would get old fast).
-  // Resets when a retake sends the phase back to "ready".
+  // not every subsequent filter/layout/caption regrade (that would get old
+  // fast). Resets when a retake sends the phase back to "ready".
   useEffect(() => {
     if (state.phase === "revealed" && !hasBurstThisSession.current) {
       hasBurstThisSession.current = true;
@@ -58,10 +54,6 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
     await navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
-
-  function handleMagnetSubmit(addressHost: MagnetAddress, addressGuest: MagnetAddress) {
-    orderMagnet(addressHost, addressGuest);
   }
 
   return (
@@ -119,14 +111,8 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                 <RoundIndicator current={state.currentRound} total={state.totalRounds} phase={state.phase} />
 
                 <div className="relative mt-4 grid grid-cols-2 gap-3 overflow-hidden rounded-3xl border-8 border-card bg-black p-2 shadow-2xl">
-                  <VideoTile videoRef={localVideoRef} label="You" mirrored muted cssFilter={activeFilterCss} />
-                  <VideoTile
-                    videoRef={remoteVideoRef}
-                    label="Them"
-                    mirrored={false}
-                    muted={false}
-                    cssFilter={activeFilterCss}
-                  />
+                  <VideoTile videoRef={localVideoRef} label="You" mirrored muted />
+                  <VideoTile videoRef={remoteVideoRef} label="Them" mirrored={false} muted={false} />
 
                   {state.flashing && (
                     <div className="flash-overlay pointer-events-none absolute inset-0 bg-white" />
@@ -151,33 +137,19 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                 </div>
 
                 {state.phase === "ready" && (
-                  <>
-                    <FilterPicker
-                      stream={localStream}
-                      selectedFilter={state.selectedFilter}
-                      onSelect={selectFilter}
-                    />
-                    <CaptionField caption={state.caption} onChange={setCaption} />
-                    <div className="mt-6 flex justify-center">
-                      <button
-                        onClick={startCountdown}
-                        className="rounded-full bg-accent px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-accent/20 transition hover:brightness-110"
-                      >
-                        Start countdown
-                      </button>
-                    </div>
-                  </>
+                  <div className="mt-6 flex justify-center">
+                    <button
+                      onClick={startCountdown}
+                      className="rounded-full bg-accent px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-accent/20 transition hover:brightness-110"
+                    >
+                      Start countdown
+                    </button>
+                  </div>
                 )}
 
                 {state.phase === "round-breather" && (
                   <p className="mt-6 text-center text-sm opacity-70">
                     Got it! Get ready for the next one…
-                  </p>
-                )}
-
-                {state.phase !== "ready" && state.selectedFilter !== "none" && (
-                  <p className="mt-4 text-center text-xs opacity-50">
-                    Filter: {PHOTOBOOTH_FILTERS.find((f) => f.id === state.selectedFilter)?.label}
                   </p>
                 )}
               </div>
@@ -192,12 +164,12 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
                   roundResults={state.roundResults}
                   caption={state.caption}
                   regrading={state.regradingStrip}
-                  localStream={localStream}
                   selectedFilter={state.selectedFilter}
+                  selectedLayout={state.selectedLayout}
                   onSelectFilter={selectFilter}
+                  onSelectLayout={selectLayout}
                   onSetCaption={setCaption}
                   onRetake={retake}
-                  onOrderMagnet={() => setShowMagnetForm(true)}
                 />
               </>
             )}
@@ -210,14 +182,6 @@ export function PhotoboothSession({ code, role }: { code: string; role: Role }) 
             Start a new session
           </Link>
         </StatusCard>
-      )}
-
-      {showMagnetForm && (
-        <MagnetOrderForm
-          confirmedOrderId={state.magnetOrderId}
-          onSubmit={handleMagnetSubmit}
-          onClose={() => setShowMagnetForm(false)}
-        />
       )}
     </div>
   );
@@ -278,13 +242,11 @@ function VideoTile({
   label,
   mirrored,
   muted,
-  cssFilter,
 }: {
   videoRef: (node: HTMLVideoElement | null) => void;
   label: string;
   mirrored: boolean;
   muted: boolean;
-  cssFilter?: string;
 }) {
   return (
     <div className="relative aspect-square overflow-hidden rounded-2xl bg-zinc-900">
@@ -294,10 +256,7 @@ function VideoTile({
         playsInline
         muted={muted}
         className="h-full w-full object-cover"
-        style={{
-          transform: mirrored ? "scaleX(-1)" : undefined,
-          filter: cssFilter,
-        }}
+        style={{ transform: mirrored ? "scaleX(-1)" : undefined }}
       />
       <span className="absolute bottom-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-xs text-white">
         {label}
@@ -340,26 +299,47 @@ function StripReveal({
   roundResults,
   caption,
   regrading,
-  localStream,
   selectedFilter,
+  selectedLayout,
   onSelectFilter,
+  onSelectLayout,
   onSetCaption,
   onRetake,
-  onOrderMagnet,
 }: {
   stripUrl: string;
   clipUrl: string | null;
   roundResults: RoundResult[];
   caption: string;
   regrading: boolean;
-  localStream: MediaStream | null;
   selectedFilter: FilterId;
+  selectedLayout: PolaroidLayout;
   onSelectFilter: (id: FilterId) => void;
+  onSelectLayout: (layout: PolaroidLayout) => void;
   onSetCaption: (caption: string) => void;
   onRetake: () => void;
-  onOrderMagnet: () => void;
 }) {
-  const [showTweaks, setShowTweaks] = useState(false);
+  // Instant visual feedback the moment a filter tile is clicked — the CSS
+  // approximation goes on the actual displayed photos right away, rather
+  // than making people stare at the old grade for the second or so it
+  // takes sharp to regrade all four rounds server-side. Clears itself once
+  // a fresh stripUrl lands (the real, baked-in pixels have caught up) —
+  // done as a render-time reset (React's recommended pattern for "some
+  // state depends on a prop change") rather than an effect, since an
+  // effect here would mean an extra, visibly-laggy render before the
+  // preview clears.
+  const [previewCss, setPreviewCss] = useState("none");
+  const [lastStripUrl, setLastStripUrl] = useState(stripUrl);
+  if (stripUrl !== lastStripUrl) {
+    setLastStripUrl(stripUrl);
+    setPreviewCss("none");
+  }
+
+  function handleSelectFilter(id: FilterId) {
+    setPreviewCss(PHOTOBOOTH_FILTERS.find((f) => f.id === id)?.cssPreview ?? "none");
+    onSelectFilter(id);
+  }
+
+  const previewPhotoUrl = [...roundResults].sort((a, b) => a.round - b.round)[0]?.compositeUrl ?? null;
 
   return (
     <div className="flex w-full max-w-sm flex-col items-center">
@@ -370,7 +350,12 @@ function StripReveal({
         <p className="mb-2 animate-pulse text-xs font-medium text-accent-strong">Updating your strip…</p>
       )}
 
-      <PolaroidStrip roundResults={roundResults} caption={caption} />
+      <PolaroidStrip
+        roundResults={roundResults}
+        caption={caption}
+        layout={selectedLayout}
+        cssFilterPreview={previewCss}
+      />
 
       <div className="mt-2 grid w-full grid-cols-2 gap-3">
         <a
@@ -390,26 +375,13 @@ function StripReveal({
           </a>
         )}
       </div>
-      <button
-        onClick={onOrderMagnet}
-        className="mt-3 w-full rounded-full bg-accent py-3 font-semibold text-white shadow-lg shadow-accent/20 transition hover:brightness-110"
-      >
-        Turn this into a magnet 🧲
-      </button>
 
-      <button
-        onClick={() => setShowTweaks((v) => !v)}
-        className="mt-4 text-sm font-medium text-accent-strong hover:opacity-80"
-      >
-        {showTweaks ? "Hide filters" : "Not feeling it? Try another filter"}
-      </button>
-
-      {showTweaks && (
-        <div className="mt-2 w-full rounded-2xl border border-border bg-card p-4">
-          <FilterPicker stream={localStream} selectedFilter={selectedFilter} onSelect={onSelectFilter} />
-          <CaptionField caption={caption} onChange={onSetCaption} />
-        </div>
-      )}
+      <div className="mt-5 w-full rounded-2xl border border-border bg-card p-4">
+        <p className="text-center text-sm font-semibold text-accent-strong">Make it yours</p>
+        <FilterPicker photoUrl={previewPhotoUrl} selectedFilter={selectedFilter} onSelect={handleSelectFilter} />
+        <LayoutPicker selectedLayout={selectedLayout} onSelect={onSelectLayout} />
+        <CaptionField caption={caption} onChange={onSetCaption} />
+      </div>
 
       <button onClick={onRetake} className="mt-4 text-sm opacity-60 hover:opacity-100">
         Retake the strip

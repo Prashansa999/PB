@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { applyFilter } from "./filters";
 import type { FilterId } from "../shared/filters";
+import type { PolaroidLayout } from "../shared/layout";
 
 const STORAGE_ROOT = path.join(process.cwd(), "storage", "strips");
 
@@ -90,10 +91,24 @@ const POLAROID_BOTTOM_MARGIN = 88; // the classic instant-photo caption strip
 const POLAROID_CORNER_RADIUS = 10;
 const POLAROID_GAP = 34;
 const CANVAS_PADDING = 60;
-// Alternating tilt/drift per card index — deterministic, not random, so a
-// given session's layout is stable if the strip is ever regenerated.
-const CARD_ROTATIONS_DEG = [-4, 3, -3.5, 4.5];
-const CARD_DRIFT_PX = [-16, 12, -10, 16];
+const HEADER_HEIGHT = 76;
+const SHADOW_OFFSET = 7;
+
+// Per-layout, deterministic (not random) tilt angles and placement
+// constants — deterministic so a given session's arrangement is stable if
+// the strip is ever regenerated (filter change, caption edit).
+const ROTATIONS_DEG: Record<PolaroidLayout, number[]> = {
+  strip: [-4, 3, -3.5, 4.5],
+  collage: [-6, 4, -5, 6],
+  stack: [-11, 7, -8, 12],
+};
+const STRIP_DRIFT_PX = [-16, 12, -10, 16];
+const STACK_FAN_PX: { dx: number; dy: number }[] = [
+  { dx: -34, dy: 0 },
+  { dx: 16, dy: 14 },
+  { dx: -14, dy: 30 },
+  { dx: 32, dy: 40 },
+];
 
 async function buildWhitePolaroidCard(
   photo: Buffer,
@@ -166,57 +181,136 @@ async function rotateWithTransparentPadding(
   return { buffer: rotated, width, height };
 }
 
+interface RotatedCard {
+  buffer: Buffer;
+  width: number;
+  height: number;
+}
+
+interface LayoutResult {
+  width: number;
+  height: number;
+  placements: { left: number; top: number }[];
+}
+
+/** Vertical column, the classic photobooth strip — each card centered with
+ * a small alternating horizontal drift. */
+function layoutStrip(cards: RotatedCard[]): LayoutResult {
+  const maxWidth = Math.max(...cards.map((c) => c.width));
+  const maxDrift = Math.max(...STRIP_DRIFT_PX.map(Math.abs));
+  const width = maxWidth + maxDrift * 2 + CANVAS_PADDING * 2;
+
+  let y = HEADER_HEIGHT;
+  const placements = cards.map((c, i) => {
+    const drift = STRIP_DRIFT_PX[i % STRIP_DRIFT_PX.length];
+    const left = Math.round((width - c.width) / 2 + drift);
+    const top = y;
+    y += c.height + POLAROID_GAP;
+    return { left, top };
+  });
+
+  return { width, height: y - POLAROID_GAP + CANVAS_PADDING, placements };
+}
+
+/** Two-up scattered grid with the second column staggered down — the
+ * masonry-ish, not-quite-aligned arrangement a Pinterest moodboard has,
+ * rather than a rigid photo grid. */
+function layoutCollage(cards: RotatedCard[]): LayoutResult {
+  const colGap = 20;
+  const rowGap = 26;
+  const columnStagger = 64;
+  const maxWidth = Math.max(...cards.map((c) => c.width));
+  const maxHeight = Math.max(...cards.map((c) => c.height));
+  const width = maxWidth * 2 + colGap + CANVAS_PADDING * 2;
+
+  const placements = cards.map((c, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const left = CANVAS_PADDING + col * (maxWidth + colGap) + Math.round((maxWidth - c.width) / 2);
+    const top = HEADER_HEIGHT + (col === 1 ? columnStagger : 0) + row * (maxHeight + rowGap);
+    return { left, top };
+  });
+
+  const maxBottom = Math.max(...placements.map((p, i) => p.top + cards[i].height));
+  return { width, height: maxBottom + CANVAS_PADDING, placements };
+}
+
+/** All four cards fanned out from roughly the same center point, like a
+ * pile of real Polaroids someone just set down — later rounds drawn on
+ * top, so the most recent photo (and the caption, which always lands on
+ * the last round) ends up the most visible one. */
+function layoutStack(cards: RotatedCard[]): LayoutResult {
+  const maxWidth = Math.max(...cards.map((c) => c.width));
+  const fanSpread = Math.max(...STACK_FAN_PX.map((f) => Math.abs(f.dx))) * 2;
+  const width = maxWidth + fanSpread + CANVAS_PADDING * 2;
+  const centerX = width / 2;
+  const top0 = HEADER_HEIGHT + 10;
+
+  const placements = cards.map((c, i) => {
+    const fan = STACK_FAN_PX[i % STACK_FAN_PX.length];
+    const left = Math.round(centerX - c.width / 2 + fan.dx);
+    const top = Math.round(top0 + fan.dy);
+    return { left, top };
+  });
+
+  const maxBottom = Math.max(...placements.map((p, i) => p.top + cards[i].height));
+  return { width, height: maxBottom + CANVAS_PADDING, placements };
+}
+
+function computeLayout(layout: PolaroidLayout, cards: RotatedCard[]): LayoutResult {
+  if (layout === "collage") return layoutCollage(cards);
+  if (layout === "stack") return layoutStack(cards);
+  return layoutStrip(cards);
+}
+
 /**
  * Turns every round's composite into a rotated, drop-shadowed polaroid card
- * and lays them out down the strip like they were tossed onto a table —
- * the classic scattered-photos look, not a rigid grid. The last card gets
- * the shared caption (if any) handwritten into its bottom margin, the way
- * people actually write on real Polaroids.
+ * and arranges them per the chosen layout (strip / collage / stack) — never
+ * a rigid, obviously-generated grid. The last card gets the shared caption
+ * (if any) handwritten into its bottom margin, the way people actually
+ * write on real Polaroids.
  */
 export async function assembleFinalStrip(
   code: string,
   roundBuffers: Buffer[],
-  caption: string
+  caption: string,
+  layout: PolaroidLayout
 ): Promise<{ url: string }> {
+  const rotations = ROTATIONS_DEG[layout];
+
   const cards = await Promise.all(
     roundBuffers.map((buf, i) =>
       buildWhitePolaroidCard(buf, i === roundBuffers.length - 1 ? caption || null : null)
     )
   );
-
   const rotated = await Promise.all(
-    cards.map((card, i) => rotateWithTransparentPadding(card.buffer, CARD_ROTATIONS_DEG[i % CARD_ROTATIONS_DEG.length]))
+    cards.map((card, i) => rotateWithTransparentPadding(card.buffer, rotations[i % rotations.length]))
   );
   const shadows = await Promise.all(rotated.map((r) => buildCardShadow(r.width, r.height)));
 
-  const headerHeight = 76;
-  const maxCardWidth = Math.max(...rotated.map((r) => r.width));
-  const maxDrift = Math.max(...CARD_DRIFT_PX.map(Math.abs));
-  const width = maxCardWidth + maxDrift * 2 + CANVAS_PADDING * 2;
-
-  let y = headerHeight;
-  const composites: { input: Buffer; left: number; top: number; blend?: "over" }[] = [];
-  for (let i = 0; i < rotated.length; i++) {
-    const drift = CARD_DRIFT_PX[i % CARD_DRIFT_PX.length];
-    const left = Math.round((width - rotated[i].width) / 2 + drift);
-    const shadowOffset = 7;
-    composites.push({ input: shadows[i], left: left + shadowOffset, top: y + shadowOffset });
-    composites.push({ input: rotated[i].buffer, left, top: y });
-    y += rotated[i].height + POLAROID_GAP;
-  }
-
-  const totalHeight = y - POLAROID_GAP + CANVAS_PADDING;
+  const { width, height, placements } = computeLayout(layout, rotated);
 
   const headerSvg = Buffer.from(
-    `<svg width="${width}" height="${headerHeight}" xmlns="http://www.w3.org/2000/svg">
+    `<svg width="${width}" height="${HEADER_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
       <text x="50%" y="65%" text-anchor="middle" font-family="Georgia, serif"
         font-size="34" font-weight="700" fill="#c2410c">S P Photobooth 🩷</text>
     </svg>`
   );
-  composites.unshift({ input: headerSvg, left: 0, top: 0 });
+
+  const composites: { input: Buffer; left: number; top: number }[] = [
+    { input: headerSvg, left: 0, top: 0 },
+  ];
+  for (let i = 0; i < rotated.length; i++) {
+    const { left, top } = placements[i];
+    // Shadow immediately followed by its own card, per card — not all
+    // shadows then all cards — so overlapping cards (collage/stack) layer
+    // correctly instead of every shadow sitting under every card.
+    composites.push({ input: shadows[i], left: left + SHADOW_OFFSET, top: top + SHADOW_OFFSET });
+    composites.push({ input: rotated[i].buffer, left, top });
+  }
 
   const buffer = await sharp({
-    create: { width, height: totalHeight, channels: 3, background: { r: 255, g: 248, b: 240 } },
+    create: { width, height, channels: 3, background: { r: 255, g: 248, b: 240 } },
   })
     .composite(composites)
     .png()

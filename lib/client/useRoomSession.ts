@@ -3,14 +3,10 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ClockSync } from "./clockSync";
 import { scheduleAtPreciseTime } from "./scheduler";
-import type {
-  ClientMessage,
-  MagnetAddress,
-  Role,
-  ServerMessage,
-} from "../shared/protocol";
+import type { ClientMessage, Role, ServerMessage } from "../shared/protocol";
 import { TOTAL_ROUNDS } from "../shared/protocol";
 import type { FilterId } from "../shared/filters";
+import type { PolaroidLayout } from "../shared/layout";
 
 const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 const CLOCK_RESYNC_INTERVAL_MS = 15_000;
@@ -49,9 +45,9 @@ export interface RoomSessionState {
   stripUrl: string | null;
   clipUrl: string | null;
   errorMessage: string | null;
-  magnetOrderId: string | null;
   unsupportedReason: string | null;
   selectedFilter: FilterId;
+  selectedLayout: PolaroidLayout;
   caption: string;
   regradingStrip: boolean;
 }
@@ -80,9 +76,9 @@ const initialState: RoomSessionState = {
   stripUrl: null,
   clipUrl: null,
   errorMessage: null,
-  magnetOrderId: null,
   unsupportedReason: null,
   selectedFilter: "none",
+  selectedLayout: "strip",
   caption: "",
   regradingStrip: false,
 };
@@ -114,6 +110,7 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             role: msg.role,
             phase: "lobby-waiting",
             selectedFilter: msg.selectedFilter,
+            selectedLayout: msg.selectedLayout,
             caption: msg.caption,
           };
         case "peer-joined":
@@ -122,6 +119,8 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
           return { ...state, peerConnected: false, phase: "lobby-waiting" };
         case "filter-selected":
           return { ...state, selectedFilter: msg.filterId };
+        case "layout-selected":
+          return { ...state, selectedLayout: msg.layout };
         case "caption-updated":
           return { ...state, caption: msg.caption };
         case "regrading":
@@ -162,15 +161,14 @@ function reducer(state: RoomSessionState, action: Action): RoomSessionState {
             phase: "ready",
             role: state.role,
             peerConnected: state.peerConnected,
-            // The server keeps the chosen filter and caption across a
-            // retake (see resetRoomForRetake) — mirror that here instead of
-            // dropping back to defaults, or the picker/caption field would
-            // silently lie about what the next strip will actually use.
+            // The server keeps the chosen filter, layout and caption across
+            // a retake (see resetRoomForRetake) — mirror that here instead
+            // of dropping back to defaults, or the pickers would silently
+            // lie about what the next strip will actually use.
             selectedFilter: state.selectedFilter,
+            selectedLayout: state.selectedLayout,
             caption: state.caption,
           };
-        case "magnet-order-confirmed":
-          return { ...state, magnetOrderId: msg.orderId };
         case "error":
           return { ...state, errorMessage: msg.message };
         case "room-expired":
@@ -196,11 +194,6 @@ export function useRoomSession(code: string, role: Role) {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const cancelScheduleRef = useRef<(() => void) | null>(null);
   const makingOfferRef = useRef(false);
-
-  // Reactive (not just a ref) so the filter picker can bind extra <video>
-  // preview tiles to the same live stream once it exists — a plain ref
-  // wouldn't trigger a re-render when the stream first becomes available.
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
   // The <video> tiles only mount once the UI leaves the loading phases
   // (camera permission / connecting), which happens *after* the camera
@@ -366,7 +359,6 @@ export function useRoomSession(code: string, role: Role) {
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
         dispatch({ type: "WS_CONNECTING" });
         setCameraReady(true);
-        setLocalStream(stream);
       })
       .catch(() => {
         if (!cancelled) dispatch({ type: "CAMERA_DENIED" });
@@ -475,16 +467,16 @@ export function useRoomSession(code: string, role: Role) {
     [sendMessage]
   );
 
-  const setCaption = useCallback(
-    (caption: string) => {
-      sendMessage({ type: "set-caption", caption });
+  const selectLayout = useCallback(
+    (layout: PolaroidLayout) => {
+      sendMessage({ type: "select-layout", layout });
     },
     [sendMessage]
   );
 
-  const orderMagnet = useCallback(
-    (addressHost: MagnetAddress, addressGuest: MagnetAddress) => {
-      sendMessage({ type: "order-magnet", addressHost, addressGuest });
+  const setCaption = useCallback(
+    (caption: string) => {
+      sendMessage({ type: "set-caption", caption });
     },
     [sendMessage]
   );
@@ -493,12 +485,11 @@ export function useRoomSession(code: string, role: Role) {
     state,
     localVideoRef: attachLocalVideo,
     remoteVideoRef: attachRemoteVideo,
-    localStream,
     startCountdown,
     retake,
     retryCamera,
     selectFilter,
+    selectLayout,
     setCaption,
-    orderMagnet,
   };
 }

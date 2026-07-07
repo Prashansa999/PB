@@ -148,9 +148,11 @@ async function buildWash(
 }
 
 /** Bakes the chosen filter's real pixel processing into a frame. This is
- * the authoritative output — what gets composited into the strip, what
- * downloads, what gets printed on the magnet. The client's CSS preview is
- * just a cheap approximation of this for the live camera view. */
+ * the authoritative output — what gets composited into the strip and what
+ * downloads. The client's CSS preview (applied to actual captured-photo
+ * thumbnails in the filter picker, and optimistically to the displayed
+ * strip right after a click) is just a cheap approximation of this,
+ * replaced by the real thing once the server-side regrade lands. */
 export async function applyFilter(input: Buffer, filterId: FilterId): Promise<Buffer> {
   const recipe = RECIPES[filterId];
   if (!recipe) return input;

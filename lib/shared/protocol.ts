@@ -3,6 +3,7 @@
 // sides fail to compile if a message shape drifts out of sync.
 
 import type { FilterId } from "./filters";
+import type { PolaroidLayout } from "./layout";
 
 export type Role = "host" | "guest";
 
@@ -36,20 +37,10 @@ export type ClientMessage =
     }
   | { type: "retake" }
   | { type: "select-filter"; filterId: FilterId }
-  | { type: "set-caption"; caption: string }
-  | { type: "order-magnet"; addressHost: MagnetAddress; addressGuest: MagnetAddress };
+  | { type: "select-layout"; layout: PolaroidLayout }
+  | { type: "set-caption"; caption: string };
 
 export const CAPTION_MAX_LENGTH = 80;
-
-export interface MagnetAddress {
-  name: string;
-  line1: string;
-  line2?: string;
-  city: string;
-  region: string;
-  postalCode: string;
-  country: string;
-}
 
 // ---------- Server -> Client ----------
 
@@ -60,11 +51,13 @@ export type ServerMessage =
       code: string;
       state: RoomState;
       selectedFilter: FilterId;
+      selectedLayout: PolaroidLayout;
       caption: string;
     }
   | { type: "peer-joined" }
   | { type: "peer-left" }
   | { type: "filter-selected"; filterId: FilterId }
+  | { type: "layout-selected"; layout: PolaroidLayout }
   | { type: "caption-updated"; caption: string }
   // Distinct from "compositing": that phase covers the initial capture
   // flow. This one fires when an already-revealed strip is being
@@ -90,6 +83,5 @@ export type ServerMessage =
   | { type: "compositing" }
   | { type: "reveal"; stripUrl: string; clipUrl: string | null; tReveal: number }
   | { type: "retake-ack" }
-  | { type: "magnet-order-confirmed"; orderId: string }
   | { type: "error"; code: string; message: string }
   | { type: "room-expired" };
