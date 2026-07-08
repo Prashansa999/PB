@@ -56,7 +56,7 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
     modulate: { brightness: 1.04, saturation: 0.9 },
     linear: { a: 0.92, b: 14 }, // milky lifted blacks — the soft film fade
     wash: { r: 255, g: 216, b: 178, alpha: 0.12, blend: "soft-light" },
-    bloom: { sigma: 16, gain: 1.9, offset: -135, alpha: 0.62 },
+    bloom: { sigma: 13, gain: 1.7, offset: -115, alpha: 0.5 },
     grainAlpha: 0.05,
     vignetteStrength: 0.12,
   },
@@ -64,7 +64,7 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
     modulate: { brightness: 1.03, saturation: 1.02, hue: -5 },
     linear: { a: 0.94, b: 9 },
     wash: { r: 255, g: 200, b: 150, alpha: 0.16, blend: "soft-light" },
-    bloom: { sigma: 12, gain: 1.6, offset: -90, alpha: 0.5 },
+    bloom: { sigma: 10, gain: 1.45, offset: -75, alpha: 0.4 },
     grainAlpha: 0.055,
     vignetteStrength: 0.11,
   },
@@ -85,7 +85,7 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
   dreamy: {
     modulate: { brightness: 1.06, saturation: 0.93 },
     linear: { a: 0.92, b: 12 },
-    bloom: { sigma: 24, gain: 2.4, offset: -190, alpha: 0.85 }, // the heaviest glow in the catalog
+    bloom: { sigma: 20, gain: 2.1, offset: -160, alpha: 0.72 }, // the heaviest glow in the catalog
     grainAlpha: 0.02,
     vignetteStrength: 0.05,
   },

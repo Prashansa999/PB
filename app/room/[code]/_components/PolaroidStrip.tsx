@@ -46,8 +46,14 @@ function Card({
         style={{ filter: cssFilterPreview }}
       />
       {/* The bottom "chin": caption centered, date handwritten in the
-          corner — both only on the last card, once per strip. */}
-      <div className="relative mt-2 flex min-h-[34px] items-center justify-center px-1 pb-1">
+          corner — both only on the last card, once per strip. The other
+          three get a slim classic-Instax chin instead of matching empty
+          space, so the photo itself reads bigger inside the card. */}
+      <div
+        className={`relative flex items-center justify-center px-1 ${
+          isLast ? "mt-2 min-h-[34px] pb-1" : "mt-1 min-h-[6px]"
+        }`}
+      >
         {isLast && caption && (
           <p className={`px-8 text-center text-lg leading-tight text-[#6b4a3a] ${CURSIVE}`}>{caption}</p>
         )}

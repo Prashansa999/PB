@@ -45,17 +45,19 @@ export function decodeCapturedFrame(dataUrl: string): Buffer {
  * crisp. Reliable and offline (no segmentation model), which is why it's an
  * option rather than trying to be true person-cutout portrait mode. */
 async function applyBackgroundBlur(tile: Buffer): Promise<Buffer> {
-  const blurred = await sharp(tile).blur(12).toBuffer();
+  const blurred = await sharp(tile).blur(10).toBuffer();
 
   // A radial mask: opaque white over the central subject area, fading to
   // transparent toward the edges. Used as a dest-in mask so only the sharp
-  // center survives, composited over the fully-blurred base.
+  // center survives, composited over the fully-blurred base. The opaque
+  // zone is generous (68% before any falloff starts) so a face that isn't
+  // dead-center in its half of the tile doesn't get caught by the blur.
   const mask = Buffer.from(
     `<svg width="${TILE_WIDTH}" height="${TILE_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <radialGradient id="focus" cx="50%" cy="46%" r="62%">
+        <radialGradient id="focus" cx="50%" cy="46%" r="74%">
           <stop offset="0%" stop-color="#fff" stop-opacity="1" />
-          <stop offset="55%" stop-color="#fff" stop-opacity="1" />
+          <stop offset="68%" stop-color="#fff" stop-opacity="1" />
           <stop offset="100%" stop-color="#fff" stop-opacity="0" />
         </radialGradient>
       </defs>
@@ -131,11 +133,15 @@ export async function compositeRound(
   return { buffer, url: `/api/strip-image/${code}/${filename}` };
 }
 
-// Instax-mini-style frame proportions: slim, even top/side borders and a
-// noticeably deeper bottom "chin" for the handwritten caption.
+// Instax-mini-style frame proportions: slim, even top/side borders. Only
+// the last card carries the caption + date, so only it gets the deep chin
+// — the other three get a slim classic-Instax chin instead of the same
+// tall strip of empty white space, which is what was making the photo
+// itself look small inside the card.
 const POLAROID_SIDE_MARGIN = 32;
 const POLAROID_TOP_MARGIN = 32;
-const POLAROID_BOTTOM_MARGIN = 132; // the classic instant-photo caption strip
+const POLAROID_BOTTOM_MARGIN_PLAIN = 40;
+const POLAROID_BOTTOM_MARGIN_LAST = 132; // room for the handwritten caption + date
 const POLAROID_CORNER_RADIUS = 18;
 // Tight — the cards should read as one strip fresh off the booth, nearly
 // touching, not four separate photos floating apart.
@@ -174,8 +180,11 @@ async function buildWhitePolaroidCard(
   dateLabel: string | null
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const { width: photoWidth = 0, height: photoHeight = 0 } = await sharp(photo).metadata();
+  // dateLabel is only ever passed for the last card (see assembleFinalStrip)
+  // — that's the same card that gets the deep chin.
+  const bottomMargin = dateLabel ? POLAROID_BOTTOM_MARGIN_LAST : POLAROID_BOTTOM_MARGIN_PLAIN;
   const cardWidth = photoWidth + POLAROID_SIDE_MARGIN * 2;
-  const cardHeight = photoHeight + POLAROID_TOP_MARGIN + POLAROID_BOTTOM_MARGIN;
+  const cardHeight = photoHeight + POLAROID_TOP_MARGIN + bottomMargin;
   const chinTop = photoHeight + POLAROID_TOP_MARGIN;
 
   const overlays: { input: Buffer; left: number; top: number }[] = [
@@ -196,7 +205,7 @@ async function buildWhitePolaroidCard(
   if (captionText) {
     const escaped = captionText.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
     const captionSvg = Buffer.from(
-      `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
+      `<svg width="${cardWidth}" height="${bottomMargin}" xmlns="http://www.w3.org/2000/svg">
         <text x="50%" y="44%" text-anchor="middle" dominant-baseline="middle"
           font-family="${HANDWRITING}" font-style="italic"
           font-size="44" fill="#6b4a3a">${escaped}</text>
@@ -210,7 +219,7 @@ async function buildWhitePolaroidCard(
   // caption), not stamped on all four.
   if (dateLabel) {
     const dateSvg = Buffer.from(
-      `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
+      `<svg width="${cardWidth}" height="${bottomMargin}" xmlns="http://www.w3.org/2000/svg">
         <text x="${cardWidth - POLAROID_SIDE_MARGIN}" y="${captionText ? "80%" : "56%"}"
           text-anchor="end" dominant-baseline="middle"
           font-family="${HANDWRITING}" font-style="italic"
