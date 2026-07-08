@@ -37,7 +37,7 @@ export const PHOTOBOOTH_FILTERS: FilterMeta[] = [
     id: "film",
     label: "Film",
     description: "Warm, soft instant-film glow — the cozy default. 🤍",
-    cssPreview: "sepia(0.12) saturate(0.94) contrast(0.96) brightness(1.05)",
+    cssPreview: "sepia(0.12) saturate(0.9) contrast(0.94) brightness(1.05)",
   },
   {
     id: "none",

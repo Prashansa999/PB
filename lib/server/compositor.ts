@@ -16,10 +16,12 @@ const TILE_HEIGHT = 620;
 const GUTTER = 10;
 const BORDER = 18;
 
-// Warm off-white instant-film paper stock — not pure #fff, which reads
-// digital/clinical. This tint is what makes the frames feel like real
-// Instax rather than screenshots on a white div.
-const PAPER = { r: 255, g: 253, b: 248 };
+// Instant-film paper stock: clean, bright white with only a breath of
+// warmth. Real Instax frames are notably *white* — an earlier, creamier
+// value blended into the warm backdrop and read dingy instead of crisp;
+// this needs to stay just off pure #fff so the cards pop against the
+// peachy background the way a real print does on a warm surface.
+const PAPER = { r: 255, g: 255, b: 253 };
 
 async function ensureRoomDir(code: string): Promise<string> {
   const dir = path.join(STORAGE_ROOT, code);
@@ -285,8 +287,12 @@ async function buildBackdrop(width: number, height: number): Promise<Buffer> {
     const cy = seeded(i * 3 + 2) * height;
     const r = 20 + seeded(i * 3 + 3) * 70;
     const op = 0.16 + seeded(i * 7 + 5) * 0.42;
+    // Mostly golden fairy lights with the occasional blush-pink one mixed
+    // in — the two-tone string lights of a bedroom wall, not a uniform
+    // yellow wash. Roughly a quarter go pink.
+    const fill = seeded(i * 17 + 6) > 0.74 ? "url(#glowPink)" : "url(#glow)";
     glows.push(
-      `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="url(#glow)" opacity="${op.toFixed(2)}"/>`
+      `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${fill}" opacity="${op.toFixed(2)}"/>`
     );
     // Only some glows get a visible bright core, for that twinkle variance.
     if (seeded(i * 5 + 9) > 0.45) {
@@ -316,6 +322,11 @@ async function buildBackdrop(width: number, height: number): Promise<Buffer> {
           <stop offset="0%" stop-color="#ffeaba" stop-opacity="1"/>
           <stop offset="40%" stop-color="#ffd98a" stop-opacity="0.65"/>
           <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="glowPink" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffdbe4" stop-opacity="1"/>
+          <stop offset="40%" stop-color="#ffb8cb" stop-opacity="0.6"/>
+          <stop offset="100%" stop-color="#ffb8cb" stop-opacity="0"/>
         </radialGradient>
       </defs>
       <g>${glows.join("")}</g>

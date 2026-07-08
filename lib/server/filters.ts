@@ -22,6 +22,14 @@ interface FilterRecipe {
   // Faked light-trail / step-print smear: N offset, faded, screen-blended
   // copies of the frame layered back on top of itself.
   streak?: { dx: number; dy: number; alpha: number }[];
+  // Dreamy halation glow: a blurred copy of the frame is pushed through a
+  // highlight-extraction curve (gain/offset — shadows clamp to black, which
+  // is neutral under screen blending) and screen-blended back over the
+  // original. Bright areas — skin, flash reflections, lights — halo past
+  // their edges the way instant-film lenses bloom, while shadows and faces
+  // stay sharp. This is most of what makes those photos read "soft and
+  // romantic" instead of "webcam".
+  bloom?: { sigma: number; gain: number; offset: number; alpha: number };
 }
 
 const RECIPES: Record<FilterId, FilterRecipe> = {
@@ -45,18 +53,20 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
   // warm-toned monochrome — real Instax keeps its color, just muted and
   // creamy.
   film: {
-    modulate: { brightness: 1.05, saturation: 0.94 },
-    linear: { a: 0.94, b: 10 }, // lift the blacks slightly for that soft film fade
+    modulate: { brightness: 1.04, saturation: 0.9 },
+    linear: { a: 0.92, b: 14 }, // milky lifted blacks — the soft film fade
     wash: { r: 255, g: 216, b: 178, alpha: 0.12, blend: "soft-light" },
-    grainAlpha: 0.045,
-    vignetteStrength: 0.1,
+    bloom: { sigma: 14, gain: 1.8, offset: -120, alpha: 0.6 },
+    grainAlpha: 0.05,
+    vignetteStrength: 0.12,
   },
   retro: {
-    modulate: { brightness: 1.03, saturation: 1.04, hue: -5 },
-    linear: { a: 0.96, b: 6 },
+    modulate: { brightness: 1.03, saturation: 1.02, hue: -5 },
+    linear: { a: 0.94, b: 9 },
     wash: { r: 255, g: 200, b: 150, alpha: 0.16, blend: "soft-light" },
-    grainAlpha: 0.05,
-    vignetteStrength: 0.1,
+    bloom: { sigma: 12, gain: 1.6, offset: -90, alpha: 0.5 },
+    grainAlpha: 0.055,
+    vignetteStrength: 0.11,
   },
   noir: {
     greyscale: true,
@@ -73,10 +83,11 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
     linear: { a: 1.03, b: -3 },
   },
   dreamy: {
-    modulate: { brightness: 1.07, saturation: 0.95 },
-    linear: { a: 0.94, b: 6 },
-    grainAlpha: 0.015,
-    vignetteStrength: 0.04,
+    modulate: { brightness: 1.06, saturation: 0.93 },
+    linear: { a: 0.92, b: 12 },
+    bloom: { sigma: 20, gain: 2.2, offset: -170, alpha: 0.75 }, // the heaviest glow in the catalog
+    grainAlpha: 0.02,
+    vignetteStrength: 0.05,
   },
   vivid: {
     modulate: { brightness: 1.02, saturation: 1.22 },
@@ -179,6 +190,20 @@ export async function applyFilter(input: Buffer, filterId: FilterId): Promise<Bu
 
   let buffer = await pipeline.toBuffer();
   const { width = 0, height = 0 } = await sharp(buffer).metadata();
+
+  // Halation bloom — see the FilterRecipe comment. Blur first (spread the
+  // light), then the gain/offset curve keeps only what was bright enough
+  // to glow, then screen-blend it back over the sharp original.
+  if (recipe.bloom) {
+    const { sigma, gain, offset, alpha } = recipe.bloom;
+    const glow = await sharp(buffer)
+      .blur(sigma)
+      .linear(gain, offset)
+      .ensureAlpha(alpha)
+      .png()
+      .toBuffer();
+    buffer = await sharp(buffer).composite([{ input: glow, blend: "screen" }]).toBuffer();
+  }
 
   // Light-trail smear: offset, faded, screen-blended copies of the frame
   // laid back on top of itself. Screen blend brightens like a real light

@@ -36,7 +36,7 @@ function Card({
   return (
     <div
       className="polaroid-card rounded-[14px] p-3 pb-2 shadow-[0_18px_40px_-12px_rgba(58,36,24,0.45)]"
-      style={{ backgroundColor: "#fffdf8", ...style }}
+      style={{ backgroundColor: "#fffffd", ...style }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- server-generated, non-static asset */}
       <img
