@@ -34,12 +34,23 @@ export async function GET(
 
   try {
     const data = await readFile(filePath);
-    return new NextResponse(new Uint8Array(data), {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "private, max-age=3600",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "Content-Length": String(data.byteLength),
+      "Cache-Control": "private, max-age=3600",
+    };
+    // The final strip and clip are download targets (the reveal screen's
+    // "Download PNG"/"Download clip" buttons already set the `download`
+    // attribute, but that attribute is unreliable on some mobile browsers
+    // — notably iOS Safari, which will just navigate to the image instead
+    // of saving it). A Content-Disposition header makes the save behavior
+    // work even then. Per-round composites (round-N.png) are also served
+    // from this route but are only ever used as inline <img> previews in
+    // the strip, so they're left as a normal inline response.
+    if (filename === "strip.png" || filename === "clip.gif") {
+      headers["Content-Disposition"] = `attachment; filename="sp-photobooth-${filename}"`;
+    }
+    return new NextResponse(new Uint8Array(data), { headers });
   } catch {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
