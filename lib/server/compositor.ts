@@ -260,8 +260,16 @@ function seeded(n: number): number {
 
 /** A cozy, softly-lit backdrop for the whole strip: a warm vertical
  * gradient with scattered out-of-focus golden "fairy light" bokeh, echoing
- * the string-light photos couples actually pin their instants over. */
-function buildBackdrop(width: number, height: number): Buffer {
+ * the string-light photos couples actually pin their instants over.
+ *
+ * The bokeh softness comes from a raster Gaussian blur (sharp/libvips)
+ * rather than an SVG `<feGaussianBlur>` filter region: librsvg re-runs its
+ * (CPU-bound) filter rasterizer per filtered group, which on a strip-sized
+ * canvas with ~90 lights was the single biggest cost in the whole reveal
+ * pipeline (~3.4s of it). Rendering the lights flat, then blurring the
+ * rendered pixels directly, produces the identical soft-glow look in a
+ * fraction of the time — no visual change, just a faster path to it. */
+async function buildBackdrop(width: number, height: number): Promise<Buffer> {
   const glows: string[] = []; // big, soft, out-of-focus halos
   const cores: string[] = []; // tiny bright centers, the "bulb" itself
   const count = Math.max(12, Math.round((width * height) / 70000));
@@ -281,27 +289,39 @@ function buildBackdrop(width: number, height: number): Buffer {
       );
     }
   }
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#fdf1e7"/>
-        <stop offset="55%" stop-color="#f8e5d4"/>
-        <stop offset="100%" stop-color="#f1d9c4"/>
-      </linearGradient>
-      <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#ffeaba" stop-opacity="1"/>
-        <stop offset="40%" stop-color="#ffd98a" stop-opacity="0.65"/>
-        <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
-      </radialGradient>
-      <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur stdDeviation="7"/>
-      </filter>
-    </defs>
-    <rect width="${width}" height="${height}" fill="url(#bg)"/>
-    <g filter="url(#soft)">${glows.join("")}</g>
-    <g filter="url(#soft)">${cores.join("")}</g>
-  </svg>`;
-  return Buffer.from(svg);
+
+  const gradientSvg = Buffer.from(
+    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#fdf1e7"/>
+          <stop offset="55%" stop-color="#f8e5d4"/>
+          <stop offset="100%" stop-color="#f1d9c4"/>
+        </linearGradient>
+      </defs>
+      <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    </svg>`
+  );
+  const lightsSvg = Buffer.from(
+    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffeaba" stop-opacity="1"/>
+          <stop offset="40%" stop-color="#ffd98a" stop-opacity="0.65"/>
+          <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <g>${glows.join("")}</g>
+      <g>${cores.join("")}</g>
+    </svg>`
+  );
+
+  const [gradient, lightsBlurred] = await Promise.all([
+    sharp(gradientSvg).png().toBuffer(),
+    sharp(lightsSvg).png().blur(7).toBuffer(),
+  ]);
+
+  return sharp(gradient).composite([{ input: lightsBlurred, blend: "over" }]).png().toBuffer();
 }
 
 async function rotateWithTransparentPadding(
@@ -417,15 +437,24 @@ export async function assembleFinalStrip(
   const now = new Date();
   const cardDate = `${now.getMonth() + 1}.${now.getDate()}.${String(now.getFullYear()).slice(-2)}`;
 
-  const cards = await Promise.all(
-    roundBuffers.map((buf, i) =>
-      buildWhitePolaroidCard(buf, i === roundBuffers.length - 1 ? caption || null : null, cardDate)
-    )
+  // Each round's card -> rotate -> shadow chain is independent of every
+  // other round's, so run all four chains fully concurrently rather than
+  // three sequential Promise.all barriers (which would make every round
+  // wait for the slowest of the previous stage before starting its next).
+  const perCard = await Promise.all(
+    roundBuffers.map(async (buf, i) => {
+      const card = await buildWhitePolaroidCard(
+        buf,
+        i === roundBuffers.length - 1 ? caption || null : null,
+        cardDate
+      );
+      const rotated = await rotateWithTransparentPadding(card.buffer, rotations[i % rotations.length]);
+      const shadow = await buildCardShadow(rotated.width, rotated.height);
+      return { rotated, shadow };
+    })
   );
-  const rotated = await Promise.all(
-    cards.map((card, i) => rotateWithTransparentPadding(card.buffer, rotations[i % rotations.length]))
-  );
-  const shadows = await Promise.all(rotated.map((r) => buildCardShadow(r.width, r.height)));
+  const rotated = perCard.map((c) => c.rotated);
+  const shadows = perCard.map((c) => c.shadow);
 
   const { width, height, placements } = computeLayout(layout, rotated);
 
@@ -459,7 +488,7 @@ export async function assembleFinalStrip(
     composites.push({ input: rotated[i].buffer, left, top });
   }
 
-  const buffer = await sharp(buildBackdrop(width, height))
+  const buffer = await sharp(await buildBackdrop(width, height))
     .composite(composites)
     .png()
     .toBuffer();

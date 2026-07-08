@@ -6,6 +6,18 @@ import { createRoom } from "./lib/server/roomStore";
 const port = parseInt(process.env.PORT || "3000", 10);
 const dev = process.env.NODE_ENV !== "production";
 
+// A single unhandled rejection or thrown error anywhere (e.g. a stray sharp
+// failure that isn't inside one of wsHandler's try/catch blocks) would
+// otherwise crash the whole Node process — and with it every open
+// WebSocket for every room, which is exactly the kind of "connection is
+// lost" symptom this is guarding against. Log and keep serving instead.
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaught exception:", err);
+});
+
 // The server is created before `next()` so it can be handed to Next as
 // `httpServer` — that's what lets Next wire up its own dev-mode HMR
 // WebSocket upgrade handling on this same server, alongside our own

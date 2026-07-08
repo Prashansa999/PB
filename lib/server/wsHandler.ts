@@ -90,6 +90,7 @@ async function handleFrameComplete(room: Room, round: number): Promise<void> {
   );
 
   try {
+    const compositeT0 = Date.now();
     const { buffer, url } = await compositeRound(
       room.code,
       round,
@@ -102,9 +103,13 @@ async function handleFrameComplete(room: Room, round: number): Promise<void> {
     data.compositeUrl = url;
 
     broadcast(room, { type: "round-captured", round, compositeUrl: url, skewMs });
-    // Core product-health metric (build-prompt §11): median/p95 capture
-    // skew is what "at the same second" actually stands or falls on.
-    console.log(`[room ${room.code}] round ${round} capture skew: ${skewMs}ms`);
+    // Core product-health metrics (build-prompt §11): median/p95 capture
+    // skew is what "at the same second" actually stands or falls on; the
+    // composite duration is what the "Developing your polaroids" wait is
+    // actually made of, on the last round.
+    console.log(
+      `[room ${room.code}] round ${round} capture skew: ${skewMs}ms, composite: ${Date.now() - compositeT0}ms`
+    );
 
     const nextRound = round + 1;
     if (nextRound < room.totalRounds) {
@@ -116,7 +121,9 @@ async function handleFrameComplete(room: Room, round: number): Promise<void> {
         }
       }, INTER_ROUND_DELAY_MS);
     } else {
+      const finalizeT0 = Date.now();
       await finalizeStrip(room);
+      console.log(`[room ${room.code}] finalizeStrip (strip+clip): ${Date.now() - finalizeT0}ms`);
     }
   } catch (err) {
     broadcast(room, {
@@ -242,6 +249,35 @@ export function attachWebSocketServer(server: HttpServer): void {
   // HTTP server. Handling 'upgrade' ourselves lets us ignore non-matching
   // paths instead of aborting them, so Next's listener still gets a turn.
   const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+
+  // Heartbeat (standard `ws` pattern): the compositing/regrade pipeline can
+  // legitimately run for a few seconds with no application messages in
+  // either direction. Some proxies/load balancers in front of a deployed
+  // instance close WebSocket connections after a period of silence,
+  // regardless of whether the underlying TCP connection is still fine —
+  // that silent disconnect is what reads to a user as "connection lost"
+  // right as the strip is developing. Sending a ping frame periodically
+  // keeps traffic flowing on the wire so nothing in between mistakes the
+  // room for idle, independent of how long any single round takes.
+  const HEARTBEAT_INTERVAL_MS = 20 * 1000;
+  wss.on("connection", (ws) => {
+    (ws as WebSocket & { isAlive?: boolean }).isAlive = true;
+    ws.on("pong", () => {
+      (ws as WebSocket & { isAlive?: boolean }).isAlive = true;
+    });
+  });
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      const tracked = ws as WebSocket & { isAlive?: boolean };
+      if (tracked.isAlive === false) {
+        ws.terminate();
+        continue;
+      }
+      tracked.isAlive = false;
+      ws.ping();
+    }
+  }, HEARTBEAT_INTERVAL_MS).unref();
+  wss.on("close", () => clearInterval(heartbeat));
 
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = new URL(req.url ?? "", "http://internal");
