@@ -3,8 +3,8 @@
 import type { RoundResult } from "@/lib/client/useRoomSession";
 import type { PolaroidLayout } from "@/lib/shared/layout";
 
-const STRIP_TILTS_DEG = [-4, 3, -3.5, 4.5];
-const STRIP_DRIFTS_PX = [-10, 8, -6, 10];
+const STRIP_TILTS_DEG = [-1.8, 1.4, -1.5, 2];
+const STRIP_DRIFTS_PX = [-6, 4, -3, 6];
 const COLLAGE_TILTS_DEG = [-5, 4, -4, 5];
 const STACK_TILTS_DEG = [-9, 6, -7, 10];
 const STACK_FAN_PX: { dx: number; dy: number }[] = [
@@ -45,12 +45,15 @@ function Card({
         className="w-64 rounded-[3px] sm:w-72"
         style={{ filter: cssFilterPreview }}
       />
-      {/* The bottom "chin": caption centered, date handwritten in the corner. */}
+      {/* The bottom "chin": caption centered, date handwritten in the
+          corner — both only on the last card, once per strip. */}
       <div className="relative mt-2 flex min-h-[34px] items-center justify-center px-1 pb-1">
         {isLast && caption && (
           <p className={`px-8 text-center text-lg leading-tight text-[#6b4a3a] ${CURSIVE}`}>{caption}</p>
         )}
-        <span className={`absolute bottom-0 right-1 text-sm text-[#a8836a] ${CURSIVE}`}>{dateLabel}</span>
+        {isLast && (
+          <span className={`absolute bottom-0 right-1 text-sm text-[#a8836a] ${CURSIVE}`}>{dateLabel}</span>
+        )}
       </div>
     </div>
   );
@@ -136,9 +139,10 @@ export function PolaroidStrip({
     );
   }
 
-  // strip (default)
+  // strip (default) — tight vertical column, cards nearly touching, like a
+  // strip fresh off the booth rather than four separate photos.
   return (
-    <div className="flex flex-col items-center gap-5 py-2">
+    <div className="flex flex-col items-center gap-1.5 py-2">
       {sorted.map((r, i) => {
         const tilt = STRIP_TILTS_DEG[i % STRIP_TILTS_DEG.length];
         const drift = STRIP_DRIFTS_PX[i % STRIP_DRIFTS_PX.length];

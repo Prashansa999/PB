@@ -38,18 +38,24 @@ const RECIPES: Record<FilterId, FilterRecipe> = {
   // Instax-on-fairy-lights aesthetic, tuned to flatter skin and feel like a
   // keepsake, not a webcam grab. A hair warmer and softer than a phone
   // photo, but still natural, never heavy-handed.
+  //
+  // Warmth comes from a soft-light `wash`, NOT `tint`: sharp's tint()
+  // replaces the image's chroma entirely (see the sepia note below), so a
+  // tint here would strip all the color out of the photo and leave a
+  // warm-toned monochrome — real Instax keeps its color, just muted and
+  // creamy.
   film: {
-    modulate: { brightness: 1.04, saturation: 0.99 },
-    tint: { r: 255, g: 243, b: 230 },
-    linear: { a: 0.95, b: 9 }, // lift the blacks slightly for that soft film fade
-    grainAlpha: 0.04,
-    vignetteStrength: 0.11,
+    modulate: { brightness: 1.05, saturation: 0.94 },
+    linear: { a: 0.94, b: 10 }, // lift the blacks slightly for that soft film fade
+    wash: { r: 255, g: 216, b: 178, alpha: 0.12, blend: "soft-light" },
+    grainAlpha: 0.045,
+    vignetteStrength: 0.1,
   },
   retro: {
-    modulate: { brightness: 1.03, saturation: 1.08, hue: -4 },
-    tint: { r: 255, g: 236, b: 208 },
-    linear: { a: 0.96, b: 5 },
-    grainAlpha: 0.04,
+    modulate: { brightness: 1.03, saturation: 1.04, hue: -5 },
+    linear: { a: 0.96, b: 6 },
+    wash: { r: 255, g: 200, b: 150, alpha: 0.16, blend: "soft-light" },
+    grainAlpha: 0.05,
     vignetteStrength: 0.1,
   },
   noir: {

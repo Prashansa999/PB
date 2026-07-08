@@ -135,7 +135,9 @@ const POLAROID_SIDE_MARGIN = 32;
 const POLAROID_TOP_MARGIN = 32;
 const POLAROID_BOTTOM_MARGIN = 132; // the classic instant-photo caption strip
 const POLAROID_CORNER_RADIUS = 18;
-const POLAROID_GAP = 48;
+// Tight — the cards should read as one strip fresh off the booth, nearly
+// touching, not four separate photos floating apart.
+const POLAROID_GAP = 14;
 const CANVAS_PADDING = 88;
 const HEADER_HEIGHT = 100;
 const SHADOW_OFFSET = 4;
@@ -144,11 +146,13 @@ const SHADOW_OFFSET = 4;
 // constants — deterministic so a given session's arrangement is stable if
 // the strip is ever regenerated (filter change, caption edit).
 const ROTATIONS_DEG: Record<PolaroidLayout, number[]> = {
-  strip: [-4, 3, -3.5, 4.5],
+  // Barely-there tilts on the strip — with the cards sitting this close,
+  // bigger angles collide and read messy instead of casual.
+  strip: [-1.8, 1.4, -1.5, 2],
   collage: [-6, 4, -5, 6],
   stack: [-11, 7, -8, 12],
 };
-const STRIP_DRIFT_PX = [-16, 12, -10, 16];
+const STRIP_DRIFT_PX = [-8, 6, -5, 8];
 const STACK_FAN_PX: { dx: number; dy: number }[] = [
   { dx: -34, dy: 0 },
   { dx: 16, dy: 14 },
@@ -165,7 +169,7 @@ const HANDWRITING = "'Segoe Script','Snell Roundhand','Bradley Hand','Comic Sans
 async function buildWhitePolaroidCard(
   photo: Buffer,
   captionText: string | null,
-  dateLabel: string
+  dateLabel: string | null
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const { width: photoWidth = 0, height: photoHeight = 0 } = await sharp(photo).metadata();
   const cardWidth = photoWidth + POLAROID_SIDE_MARGIN * 2;
@@ -200,16 +204,19 @@ async function buildWhitePolaroidCard(
   }
 
   // The date, handwritten in the corner of the chin — like people actually
-  // date their instants. Always shown, on every card.
-  const dateSvg = Buffer.from(
-    `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
-      <text x="${cardWidth - POLAROID_SIDE_MARGIN}" y="${captionText ? "80%" : "56%"}"
-        text-anchor="end" dominant-baseline="middle"
-        font-family="${HANDWRITING}" font-style="italic"
-        font-size="30" fill="#b08c72">${dateLabel}</text>
-    </svg>`
-  );
-  overlays.push({ input: dateSvg, left: 0, top: chinTop });
+  // date their instants. Once per strip (on the last card, alongside the
+  // caption), not stamped on all four.
+  if (dateLabel) {
+    const dateSvg = Buffer.from(
+      `<svg width="${cardWidth}" height="${POLAROID_BOTTOM_MARGIN}" xmlns="http://www.w3.org/2000/svg">
+        <text x="${cardWidth - POLAROID_SIDE_MARGIN}" y="${captionText ? "80%" : "56%"}"
+          text-anchor="end" dominant-baseline="middle"
+          font-family="${HANDWRITING}" font-style="italic"
+          font-size="30" fill="#b08c72">${dateLabel}</text>
+      </svg>`
+    );
+    overlays.push({ input: dateSvg, left: 0, top: chinTop });
+  }
 
   let card = await sharp({
     create: { width: cardWidth, height: cardHeight, channels: 3, background: PAPER },
@@ -443,10 +450,11 @@ export async function assembleFinalStrip(
   // wait for the slowest of the previous stage before starting its next).
   const perCard = await Promise.all(
     roundBuffers.map(async (buf, i) => {
+      const isLast = i === roundBuffers.length - 1;
       const card = await buildWhitePolaroidCard(
         buf,
-        i === roundBuffers.length - 1 ? caption || null : null,
-        cardDate
+        isLast ? caption || null : null,
+        isLast ? cardDate : null
       );
       const rotated = await rotateWithTransparentPadding(card.buffer, rotations[i % rotations.length]);
       const shadow = await buildCardShadow(rotated.width, rotated.height);

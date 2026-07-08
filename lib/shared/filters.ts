@@ -37,7 +37,7 @@ export const PHOTOBOOTH_FILTERS: FilterMeta[] = [
     id: "film",
     label: "Film",
     description: "Warm, soft instant-film glow — the cozy default. 🤍",
-    cssPreview: "sepia(0.14) saturate(0.99) contrast(0.97) brightness(1.04)",
+    cssPreview: "sepia(0.12) saturate(0.94) contrast(0.96) brightness(1.05)",
   },
   {
     id: "none",
@@ -49,7 +49,7 @@ export const PHOTOBOOTH_FILTERS: FilterMeta[] = [
     id: "retro",
     label: "Retro",
     description: "A gentle warm, faded cast — vintage without looking staged.",
-    cssPreview: "sepia(0.12) saturate(1.08) contrast(0.97) brightness(1.03) hue-rotate(-4deg)",
+    cssPreview: "sepia(0.16) saturate(1.04) contrast(0.97) brightness(1.03) hue-rotate(-5deg)",
   },
   {
     id: "noir",
