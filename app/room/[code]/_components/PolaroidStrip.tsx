@@ -52,7 +52,7 @@ function Card({
           <p className={`px-8 text-center text-lg leading-tight text-[#6b4a3a] ${CURSIVE}`}>{caption}</p>
         )}
         {isLast && (
-          <span className={`absolute bottom-0 right-1 text-sm text-[#a8836a] ${CURSIVE}`}>{dateLabel}</span>
+          <span className={`absolute bottom-0 right-1 text-sm text-[#e48ba8] ${CURSIVE}`}>{dateLabel}</span>
         )}
       </div>
     </div>

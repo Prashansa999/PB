@@ -80,7 +80,9 @@ const initialState: RoomSessionState = {
   unsupportedReason: null,
   selectedFilter: "film",
   selectedLayout: "strip",
-  backgroundBlur: false,
+  // Matches the server-side room default (roomStore.ts) — the `welcome`
+  // message re-syncs it anyway, this just avoids a toggle flicker on join.
+  backgroundBlur: true,
   caption: "",
   regradingStrip: false,
 };

@@ -91,7 +91,9 @@ export function createRoom(): Room {
     finalClipUrl: null,
     selectedFilter: "film",
     selectedLayout: "strip",
-    backgroundBlur: false,
+    // On by default — the soft-focus background is part of the dreamy
+    // house look now; the reveal panel's toggle still turns it off.
+    backgroundBlur: true,
     caption: "",
     revealVersion: 0,
     stripRegradeTimer: null,

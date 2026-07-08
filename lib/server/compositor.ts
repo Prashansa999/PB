@@ -45,7 +45,7 @@ export function decodeCapturedFrame(dataUrl: string): Buffer {
  * crisp. Reliable and offline (no segmentation model), which is why it's an
  * option rather than trying to be true person-cutout portrait mode. */
 async function applyBackgroundBlur(tile: Buffer): Promise<Buffer> {
-  const blurred = await sharp(tile).blur(9).toBuffer();
+  const blurred = await sharp(tile).blur(12).toBuffer();
 
   // A radial mask: opaque white over the central subject area, fading to
   // transparent toward the edges. Used as a dest-in mask so only the sharp
@@ -214,7 +214,7 @@ async function buildWhitePolaroidCard(
         <text x="${cardWidth - POLAROID_SIDE_MARGIN}" y="${captionText ? "80%" : "56%"}"
           text-anchor="end" dominant-baseline="middle"
           font-family="${HANDWRITING}" font-style="italic"
-          font-size="30" fill="#b08c72">${dateLabel}</text>
+          font-size="30" fill="#e48ba8">${dateLabel}</text>
       </svg>`
     );
     overlays.push({ input: dateSvg, left: 0, top: chinTop });
